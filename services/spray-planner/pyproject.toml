@@ -1,0 +1,37 @@
+[project]
+name = "spray-planner"
+version = "0.1.0"
+description = "Agente que planeja janelas de pulverização por talhão."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic-settings",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "httpx",
+    "mypy",
+    "ruff",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/spray_planner"]
+
+# Lint e formatação vêm do ruff.toml da raiz do monorepo; não declare [tool.ruff] aqui,
+# pois uma seção local sobrescreveria a configuração compartilhada.
+
+[tool.mypy]
+strict = true
+mypy_path = "src"
+packages = ["spray_planner"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "."]
