@@ -4,8 +4,8 @@ Dois projetos práticos de estudo sobre agentes de IA, voltados a problemas reai
 
 | Projeto | Tipo | Documento |
 |---|---|---|
-| 1. Consultor de Bulas e Boletins Técnicos | RAG | [projeto-1-consultor-bulas.md](./projeto-1-consultor-bulas.md) |
-| 2. Planejador de Janela de Pulverização | Agente com ferramentas | [projeto-2-planejador-pulverizacao.md](./projeto-2-planejador-pulverizacao.md) |
+| 1. Consultor de Bulas e Boletins Técnicos | RAG | [projeto-1-consultor-bulas.md](./docs/projeto-1-consultor-bulas.md) |
+| 2. Planejador de Janela de Pulverização | Agente com ferramentas | [projeto-2-planejador-pulverizacao.md](./docs/projeto-2-planejador-pulverizacao.md) |
 
 ---
 
