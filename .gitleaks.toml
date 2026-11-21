@@ -1,0 +1,10 @@
+title = "agent-planejador-pulverizacao"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Arquivos de exemplo sem segredos reais"
+paths = [
+  '''(^|/)\.env\.example$''',
+]

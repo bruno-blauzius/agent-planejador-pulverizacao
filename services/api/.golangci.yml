@@ -1,0 +1,37 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - govet          # go vet
+    - staticcheck
+    - errcheck       # proíbe silenciar erro (_ = err)
+    - errorlint      # exige %w e errors.Is/As
+    - gosec          # G101 segredo fixo, G201/G202 SQL injection
+    - sqlclosecheck  # rows/stmt sem Close
+    - rowserrcheck
+    - bodyclose
+    - contextcheck
+    - noctx          # HTTP sem context
+    - revive
+    - unused
+    - ineffassign
+  settings:
+    revive:
+      rules:
+        - name: context-as-argument   # context.Context sempre primeiro
+        - name: exported
+        - name: error-naming
+        - name: error-strings
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

@@ -1,0 +1,43 @@
+# Configuração única do ruff para os serviços Python.
+target-version = "py312"
+line-length = 100
+extend-exclude = ["services/api", "web"]
+
+[lint]
+select = [
+  "E", "W", "F",  # pycodestyle e pyflakes
+  "I",            # ordenação de imports
+  "N",            # nomes revelam intenção, padrão PEP 8
+  "UP",           # sintaxe moderna
+  "B",            # armadilhas comuns (flake8-bugbear)
+  "C4", "SIM",    # simplificações
+  "S",            # bandit: SQL injection (S608), senha fixa (S105-S107), etc.
+  "BLE",          # except genérico sem relançar
+  "TID",          # imports proibidos por camada (regra de dependência)
+]
+
+[lint.flake8-tidy-imports.banned-api]
+# Vale para todo o código; adapters, composição, testes e evals são liberados abaixo.
+"pydantic".msg = "domain/application não importam Pydantic; use dataclass (CLAUDE.md)."
+"pydantic_settings".msg = "Configuração externa só em adapters/ ou na raiz de composição."
+"langchain".msg = "LangChain vive apenas em adapters/."
+"langchain_core".msg = "LangChain vive apenas em adapters/."
+"langchain_openai".msg = "LangChain vive apenas em adapters/."
+"langgraph".msg = "LangGraph vive apenas em adapters/."
+"fastapi".msg = "FastAPI vive apenas em adapters/."
+"httpx".msg = "Chamadas HTTP vivem apenas em adapters/."
+"requests".msg = "Chamadas HTTP vivem apenas em adapters/."
+"sqlalchemy".msg = "Acesso a dados vive apenas em adapters/."
+"psycopg".msg = "Acesso a dados vive apenas em adapters/."
+
+[lint.per-file-ignores]
+# Camadas externas e composição podem usar frameworks.
+"**/adapters/**" = ["TID251"]
+"**/main.py" = ["TID251"]
+"**/alembic/**" = ["TID251"]
+# Testes e evals: assert é esperado e há valores fixos de teste.
+"**/tests/**" = ["S101", "S105", "S106", "TID251"]
+"**/evals/**" = ["S101", "TID251"]
+
+[lint.isort]
+known-first-party = ["spray_planner", "label_advisor"]

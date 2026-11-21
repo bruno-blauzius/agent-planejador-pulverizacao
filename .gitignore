@@ -1,0 +1,36 @@
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+# Dados brutos (PDFs de bulas) — nunca versionar
+services/*/data/raw/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Go
+services/api/bin/
+*.test
+*.out
+
+# Front
+web/node_modules/
+web/.nuxt/
+web/.output/
+
+# Terraform
+infra/terraform/**/.terraform/
+*.tfstate
+*.tfstate.*
+
+# IDE
+.idea/
+.vscode/

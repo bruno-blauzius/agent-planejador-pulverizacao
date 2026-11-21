@@ -1,0 +1,7 @@
+exclude_dirs:
+  - tests
+  - evals
+  - .venv
+# B101 (assert) fica de fora: só aparece em testes, já excluídos.
+skips:
+  - B101
