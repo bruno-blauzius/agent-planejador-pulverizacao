@@ -1,0 +1,16 @@
+# Only pyproject.toml, uv.lock and src/ are needed to build the image.
+.venv/
+**/__pycache__/
+**/*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+tests/
+evals/
+alembic/
+# Raw PDFs (product labels) must never end up in an image.
+data/
+.env
+.env.*
+Dockerfile
+.dockerignore
