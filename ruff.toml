@@ -34,6 +34,8 @@ select = [
 # Camadas externas e composição podem usar frameworks.
 "**/adapters/**" = ["TID251"]
 "**/main.py" = ["TID251"]
+# config.py fica na raiz do pacote (README) e usa pydantic-settings, permitido na borda.
+"**/config.py" = ["TID251"]
 "**/alembic/**" = ["TID251"]
 # Testes e evals: assert é esperado e há valores fixos de teste.
 "**/tests/**" = ["S101", "S105", "S106", "TID251"]
