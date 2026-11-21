@@ -1,0 +1,251 @@
+openapi: 3.1.0
+info:
+  title: Agentes Agro API
+  version: 0.1.0
+  description: |
+    BFF do front-end e dona dos dados de talhões e aplicações.
+    Os agentes de IA (spray-planner e label-advisor) consomem esta API por HTTP.
+servers:
+  - url: http://localhost:8080
+    description: Ambiente de desenvolvimento local
+tags:
+  - name: Health
+    description: Sondas de saúde usadas pelo Kubernetes (liveness, startup e readiness).
+  - name: Docs
+    description: Contrato e documentação interativa. Disponíveis apenas quando `API_DOCS_ENABLED=true`.
+paths:
+  /health/live:
+    get:
+      tags: [Health]
+      operationId: getLiveness
+      summary: Sonda de liveness
+      description: |
+        Usada como `livenessProbe` do Kubernetes. Indica apenas que o processo está
+        respondendo; **nunca** verifica dependências externas, para que uma falha
+        de banco ou de serviço vizinho não provoque reinício do contêiner.
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthUp"
+        "503":
+          $ref: "#/components/responses/HealthDown"
+  /health/startup:
+    get:
+      tags: [Health]
+      operationId: getStartup
+      summary: Sonda de startup
+      description: |
+        Usada como `startupProbe` do Kubernetes. Fica `down` (503) até que a
+        inicialização da API termine; depois passa a responder `up` (200).
+      responses:
+        "200":
+          $ref: "#/components/responses/HealthUp"
+        "503":
+          $ref: "#/components/responses/HealthDown"
+  /health/ready:
+    get:
+      tags: [Health]
+      operationId: getReadiness
+      summary: Sonda de readiness
+      description: |
+        Usada como `readinessProbe` do Kubernetes. Fica `down` (503) ao iniciar,
+        durante o shutdown (para drenar o tráfego) e sempre que alguma
+        dependência falhar. O campo `checks` detalha o estado de cada dependência.
+      responses:
+        "200":
+          description: A API está pronta para receber tráfego.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReport"
+              example:
+                status: up
+                checks:
+                  - name: postgres
+                    status: up
+                  - name: agent-service
+                    status: up
+        "503":
+          description: A API não está pronta (iniciando, em shutdown ou com dependência falhando).
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReport"
+              example:
+                status: down
+                checks:
+                  - name: postgres
+                    status: down
+                  - name: agent-service
+                    status: up
+  /openapi.yaml:
+    get:
+      tags: [Docs]
+      operationId: getOpenApiSpec
+      summary: Contrato OpenAPI
+      description: Devolve este contrato em YAML. Disponível apenas com `API_DOCS_ENABLED=true`; caso contrário responde 404.
+      responses:
+        "200":
+          description: Contrato OpenAPI em YAML.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /docs:
+    get:
+      tags: [Docs]
+      operationId: getDocs
+      summary: Documentação interativa
+      description: Página HTML com a documentação da API. Disponível apenas com `API_DOCS_ENABLED=true`; caso contrário responde 404.
+      responses:
+        "200":
+          description: Página HTML da documentação.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/XRequestId"
+          content:
+            text/html:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+components:
+  headers:
+    XRequestId:
+      description: Identificador da requisição, presente em todas as respostas, útil para correlacionar logs.
+      schema:
+        type: string
+    CacheControlNoStore:
+      description: Sempre `no-store`, para que sondas de saúde nunca sejam cacheadas.
+      schema:
+        type: string
+        const: no-store
+  responses:
+    HealthUp:
+      description: O componente está saudável.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthReport"
+          example:
+            status: up
+    HealthDown:
+      description: O componente não está saudável.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+        Cache-Control:
+          $ref: "#/components/headers/CacheControlNoStore"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthReport"
+          example:
+            status: down
+    NotFound:
+      description: Rota ou recurso não encontrado.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: not_found
+              message: recurso não encontrado
+    MethodNotAllowed:
+      description: Método HTTP não permitido para a rota.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: method_not_allowed
+              message: método não permitido
+    InternalError:
+      description: Erro interno inesperado.
+      headers:
+        X-Request-Id:
+          $ref: "#/components/headers/XRequestId"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: internal_error
+              message: erro interno
+  schemas:
+    HealthStatus:
+      type: string
+      enum: [up, down]
+      description: Estado de saúde.
+    HealthCheck:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+          description: Nome da dependência verificada.
+          examples: [postgres]
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+    HealthReport:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/HealthStatus"
+        checks:
+          type: array
+          description: Resultado por dependência. Omitido quando não há verificações.
+          items:
+            $ref: "#/components/schemas/HealthCheck"
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Código estável da falha.
+              enum: [not_found, method_not_allowed, internal_error]
+            message:
+              type: string
+              description: Mensagem legível para humanos.
