@@ -1,6 +1,21 @@
 PYTHON_SERVICES := services/spray-planner services/label-advisor
 
-.PHONY: hooks lint security audit
+.PHONY: hooks lint security audit up down build logs ps
+
+up: ## Sobe Postgres, api, agentes e web (exige a network externa inceres-infra)
+	docker compose up -d --build
+
+down: ## Derruba os containers e mantém o volume do banco
+	docker compose down
+
+build: ## Reconstrói as imagens de todos os serviços
+	docker compose build
+
+logs: ## Acompanha os logs de todos os serviços
+	docker compose logs -f --tail=100
+
+ps: ## Estado e saúde dos containers
+	docker compose ps
 
 hooks: ## Instala os hooks de pre-commit e pre-push
 	pre-commit install --install-hooks -t pre-commit -t pre-push

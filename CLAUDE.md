@@ -118,7 +118,10 @@ Padrões já adotados, use-os em vez de inventar alternativas:
 Na raiz:
 
 ```bash
-make up       # docker-compose com Postgres (pgvector) e serviços
+make up       # docker-compose com Postgres (pgvector) e serviços (exige a network externa inceres-infra)
+make down     # derruba os containers e mantém o volume do banco
+make logs     # logs de todos os serviços
+make ps       # estado e saúde dos containers
 make test     # testes de todos os serviços
 make lint     # lint e checagem de tipos de todos os serviços
 make eval     # avaliações dos agentes (LLM real)

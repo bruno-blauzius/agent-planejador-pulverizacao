@@ -1,0 +1,179 @@
+# Ambiente local dos Agentes Agro.
+#   make up      sobe tudo (equivale a: docker compose up -d --build)
+#   make down    derruba os containers, mantém o volume do banco
+# Decisões e motivos: docs/adr/0009-docker-compose-e-postgres.md
+#
+# Redes:
+#   agro           rede privada do projeto; só nela o Postgres é alcançável.
+#   inceres-infra  rede externa já existente (Redis, Kafka; RabbitMQ deve ser
+#                  conectado a ela). Os serviços de aplicação entram nela para
+#                  usar essa infraestrutura no futuro.
+# Os nomes dos serviços têm prefixo "agro-" onde o nome seria genérico (api,
+# web, postgres): na rede compartilhada, outro projeto com o mesmo nome
+# tornaria a resolução DNS ambígua.
+
+name: agentes-agro
+
+x-app-hardening: &app-hardening
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-healthcheck-timing: &healthcheck-timing
+  interval: 10s
+  timeout: 3s
+  retries: 5
+  start_period: 20s
+
+services:
+  agro-postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agro_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: postgres
+      # Conexões por rede exigem senha scram-sha-256, como em produção.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --data-checksums"
+      API_DB_MIGRATOR_PASSWORD: ${API_DB_MIGRATOR_PASSWORD:?defina API_DB_MIGRATOR_PASSWORD no .env}
+      API_DB_APP_PASSWORD: ${API_DB_APP_PASSWORD:?defina API_DB_APP_PASSWORD no .env}
+      LABEL_ADVISOR_DB_MIGRATOR_PASSWORD: ${LABEL_ADVISOR_DB_MIGRATOR_PASSWORD:?defina LABEL_ADVISOR_DB_MIGRATOR_PASSWORD no .env}
+      LABEL_ADVISOR_DB_APP_PASSWORD: ${LABEL_ADVISOR_DB_APP_PASSWORD:?defina LABEL_ADVISOR_DB_APP_PASSWORD no .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infra/docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./infra/docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      # Só localhost: o banco nunca fica exposto na rede da máquina.
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    shm_size: 256mb
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d postgres"]
+      <<: *healthcheck-timing
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - agro
+
+  agro-api:
+    <<: *app-hardening
+    build:
+      context: ./services/api
+    image: agentes-agro/api:dev
+    environment:
+      API_PORT: "8080"
+      API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
+      # Usado a partir da Fase 3 (pgx). Senhas devem ser URL-safe.
+      API_DATABASE_URL: postgres://api_app:${API_DB_APP_PASSWORD}@agro-postgres:5432/api?sslmode=disable
+    ports:
+      - "127.0.0.1:${API_HOST_PORT:-8002}:8080"
+    depends_on:
+      agro-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/healthcheck"]
+      <<: *healthcheck-timing
+    networks:
+      - agro
+      - inceres-infra
+
+  spray-planner:
+    <<: *app-hardening
+    build:
+      context: ./services/spray-planner
+    image: agentes-agro/spray-planner:dev
+    environment:
+      SPRAY_PLANNER_LOG_LEVEL: ${SPRAY_PLANNER_LOG_LEVEL:-INFO}
+      # O agente lê talhões pela API, nunca pelo banco.
+      SPRAY_PLANNER_API_BASE_URL: http://agro-api:8080
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+    ports:
+      - "127.0.0.1:${SPRAY_PLANNER_HOST_PORT:-8001}:8000"
+    depends_on:
+      agro-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      <<: *healthcheck-timing
+    networks:
+      - agro
+      - inceres-infra
+
+  label-advisor:
+    <<: *app-hardening
+    build:
+      context: ./services/label-advisor
+    image: agentes-agro/label-advisor:dev
+    environment:
+      LABEL_ADVISOR_LOG_LEVEL: ${LABEL_ADVISOR_LOG_LEVEL:-INFO}
+      # Usado a partir da Fase 1 (pgvector). Senhas devem ser URL-safe.
+      LABEL_ADVISOR_DATABASE_URL: postgresql://label_advisor_app:${LABEL_ADVISOR_DB_APP_PASSWORD}@agro-postgres:5432/label_advisor?sslmode=disable
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+    ports:
+      - "127.0.0.1:${LABEL_ADVISOR_HOST_PORT:-8003}:8000"
+    depends_on:
+      agro-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      <<: *healthcheck-timing
+    networks:
+      - agro
+      - inceres-infra
+
+  agro-web:
+    <<: *app-hardening
+    build:
+      context: ./web
+    image: agentes-agro/web:dev
+    environment:
+      # O front fala apenas com a API Go (server-side).
+      NUXT_API_BASE_URL: http://agro-api:8080
+    ports:
+      - "127.0.0.1:${WEB_HOST_PORT:-3000}:3000"
+    depends_on:
+      agro-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health/ready"]
+      <<: *healthcheck-timing
+    networks:
+      - agro
+      - inceres-infra
+
+volumes:
+  postgres-data:
+
+networks:
+  agro:
+    name: agentes-agro
+  inceres-infra:
+    external: true

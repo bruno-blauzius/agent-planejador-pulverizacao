@@ -244,6 +244,20 @@ cd services/api && go run ./cmd/api   # API em :8080; Swagger UI em /docs, probe
 
 Cada serviço também roda isolado. Os comandos individuais estão em [CLAUDE.md](./CLAUDE.md).
 
+### Ambiente Docker
+
+O `make up` exige a network externa `inceres-infra`, onde ficam Redis e Kafka. Para que os serviços alcancem o RabbitMQ, conecte-o uma vez com `docker network connect inceres-infra rabbitmq`. As senhas do Postgres vêm do `.env`.
+
+| Serviço | Porta no host (padrão) | Observação |
+|---|---|---|
+| `agro-api` | 8080 (`API_HOST_PORT`) | Swagger UI em `/docs` |
+| `spray-planner` | 8001 (`SPRAY_PLANNER_HOST_PORT`) | Swagger em `/docs` |
+| `label-advisor` | 8003 (`LABEL_ADVISOR_HOST_PORT`) | Swagger em `/docs` |
+| `agro-web` | 3000 (`WEB_HOST_PORT`) | Front Nuxt |
+| `agro-postgres` | 5433 (`POSTGRES_HOST_PORT`) | Postgres 17 + pgvector; bancos `api` e `label_advisor` |
+
+Todos os serviços expõem `/health/live`, `/health/startup` e `/health/ready`. As portas abrem só em `127.0.0.1`. Detalhes em [ADR 0009](docs/adr/0009-docker-compose-e-postgres.md).
+
 ---
 
 ## Roadmap
@@ -284,3 +298,4 @@ Se faltar tempo, corte os extras das fases, nunca a avaliação nem os testes do
 | 0006 | Extrator de PDF do `label-advisor` (após a comparação da Fase 1) |
 | 0007 | Pre-commit para qualidade e segurança (ruff, bandit, gitleaks, golangci-lint, pip-audit, govulncheck) |
 | 0008 | API Go com stdlib primeiro; probes de Kubernetes e Swagger embutido |
+| 0009 | Docker Compose, Postgres local próximo de produção e esqueletos dos serviços |
