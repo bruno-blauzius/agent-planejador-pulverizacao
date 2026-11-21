@@ -1,6 +1,6 @@
 # Projeto 2 — Planejador de Janela de Pulverização (Agente com ferramentas)
 
-[← Voltar ao README](./README.md)
+[← Voltar ao README](README.md)
 
 ## O problema
 
@@ -19,7 +19,7 @@ Construir um agente que, dado um conjunto de talhões, indique as melhores janel
 | Previsão do tempo | Dados horários por coordenada via Open-Meteo (vento, rajada, temperatura, umidade, probabilidade e volume de chuva) |
 | Calculadora de aptidão | Recebe os dados horários e indica se a hora/janela está apta e o motivo quando não está |
 | Cadastro de talhões | Banco com área, cultura, coordenadas, data de plantio e histórico de aplicações |
-| Regras do produto | Tabela com intervalo mínimo entre aplicações e chuva mínima sem lavagem (futuramente, o [Projeto 1](./projeto-1-consultor-bulas.md)) |
+| Regras do produto | Tabela com intervalo mínimo entre aplicações e chuva mínima sem lavagem (futuramente, o [Projeto 1](./docs/projeto-1-consultor-bulas.md)) |
 
 ## Dificuldades esperadas
 
@@ -114,4 +114,4 @@ Construir um agente que, dado um conjunto de talhões, indique as melhores janel
 
 - Memória entre conversas (lembrar preferências do operador)
 - Priorização entre talhões quando a janela não comporta todos
-- Integração com o [Projeto 1](./projeto-1-consultor-bulas.md) para checar carência antes de sugerir a aplicação, formando um sistema multiagente
+- Integração com o [Projeto 1](./docs/projeto-1-consultor-bulas.md) para checar carência antes de sugerir a aplicação, formando um sistema multiagente

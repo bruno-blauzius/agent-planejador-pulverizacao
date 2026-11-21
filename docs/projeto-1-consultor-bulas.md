@@ -1,6 +1,6 @@
 # Projeto 1 — Consultor de Bulas e Boletins Técnicos (RAG)
 
-[← Voltar ao README](./README.md)
+[← Voltar ao README](README.md)
 
 ## O problema
 
@@ -111,4 +111,4 @@ Construir um agente que responda perguntas técnicas em linguagem natural usando
 - Avaliador automático com LangSmith ou Langfuse
 - Reformulação da pergunta antes da busca
 - Ampliar para uma segunda cultura
-- Expor o agente como ferramenta para o [Projeto 2](./projeto-2-planejador-pulverizacao.md) consultar carência
+- Expor o agente como ferramenta para o [Projeto 2](./docs/projeto-2-planejador-pulverizacao.md) consultar carência
