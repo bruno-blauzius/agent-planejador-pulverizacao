@@ -12,6 +12,8 @@ repos:
       - id: check-yaml
       - id: check-toml
       - id: check-json
+        # tsconfig aceita comentários (JSONC), que não são JSON válido.
+        exclude: '(^|/)tsconfig[^/]*\.json$'
       - id: end-of-file-fixer
       - id: trailing-whitespace
       - id: check-added-large-files
