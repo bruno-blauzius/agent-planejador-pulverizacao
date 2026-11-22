@@ -1,0 +1,139 @@
+{
+  "product": "agentes-agro",
+  "realm": "inceres",
+  "productClient": "agentes-agro",
+
+  "clients": [
+    {
+      "clientId": "agentes-agro",
+      "name": "Agentes Agro",
+      "description": "Login do Agentes Agro. A services/api é o cliente OIDC (padrão BFF) e emite o cookie de sessão; ADR 0015, D6.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${AGENTES_AGRO_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "rootUrl": "${WEB_URL}",
+      "baseUrl": "/",
+      "redirectUris": ["${API_URL}/auth/callback"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "backchannel.logout.url": "${API_INTERNAL_URL}/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-agentes-agro",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "agentes-agro",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "agentes-agro-provisioner",
+      "name": "Agentes Agro: provisionador",
+      "description": "Conta de serviço da API para provisionar usuários (conta, grupo, sessões); ADR 0015, D5.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${PROVISIONER_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": false,
+      "frontchannelLogout": false,
+      "consentRequired": false,
+      "redirectUris": [],
+      "webOrigins": []
+    }
+  ],
+
+  "serviceAccountRoles": [
+    {
+      "client": "agentes-agro-provisioner",
+      "target": "realm-management",
+      "roles": ["manage-users", "view-users"]
+    }
+  ],
+
+  "scopeMappings": [
+    {
+      "client": "agentes-agro-provisioner",
+      "target": "realm-management",
+      "roles": ["manage-users", "view-users"]
+    }
+  ],
+
+  "clientScopes": [
+    { "client": "agentes-agro-provisioner", "default": ["kc-admin-api"] }
+  ],
+
+  "permissions": [
+    { "name": "dashboard.view", "description": "Ver o Painel do administrador" },
+    { "name": "companies.manage", "description": "Gerenciar empresas clientes (super admin)" },
+    { "name": "users.manage", "description": "Gerenciar usuários e convites da própria empresa" },
+    { "name": "users.manage_all", "description": "Gerenciar usuários de todas as empresas (super admin)" },
+    { "name": "registry.write", "description": "Criar e editar fazendas, talhões e proprietários" },
+    { "name": "applications.register", "description": "Registrar aplicações" },
+    { "name": "applications.confirm", "description": "Confirmar aplicações" },
+    { "name": "planner.use", "description": "Usar o Planejador e o agente" }
+  ],
+
+  "profiles": [
+    {
+      "name": "super_admin",
+      "description": "Super administrador: sistema, empresas e usuários de todas as empresas",
+      "permissions": [
+        "dashboard.view",
+        "companies.manage",
+        "users.manage",
+        "users.manage_all",
+        "registry.write",
+        "applications.register",
+        "applications.confirm",
+        "planner.use"
+      ]
+    },
+    {
+      "name": "admin",
+      "description": "Administrador: gerencia a própria empresa, os cadastros e os usuários, e confirma aplicações",
+      "permissions": [
+        "dashboard.view",
+        "users.manage",
+        "registry.write",
+        "applications.register",
+        "applications.confirm",
+        "planner.use"
+      ]
+    },
+    {
+      "name": "planning_operator",
+      "description": "Operador de planejamento: usa o Planejador e registra aplicações nas fazendas liberadas",
+      "permissions": ["applications.register", "planner.use"]
+    }
+  ],
+
+  "groups": [
+    { "path": "/agentes-agro" },
+    { "path": "/agentes-agro/super-admins", "role": "super_admin" },
+    { "path": "/agentes-agro/admins", "role": "admin" },
+    { "path": "/agentes-agro/planning-operators", "role": "planning_operator" }
+  ]
+}

@@ -1,9 +1,18 @@
 PYTHON_SERVICES := services/spray-planner services/label-advisor
 
-.PHONY: hooks lint security audit up dev down build logs ps
+.PHONY: hooks lint security audit up dev down build logs ps keycloak keycloak-check keycloak-test
 
 up: ## Sobe Postgres, api, agentes e web (exige a network externa inceres-infra)
 	docker compose up -d --build
+
+keycloak: ## Aplica no Keycloak do infra-docker (realm inceres) o client, as roles e os grupos do produto
+	uv run --no-project python infra/keycloak/apply_product.py --init-secrets
+
+keycloak-check: ## Mostra se o Keycloak diverge de infra/keycloak/agentes-agro.json (sai com 1 se divergir)
+	uv run --no-project python infra/keycloak/apply_product.py --check
+
+keycloak-test: ## Testes do script de aplicação no Keycloak (sem rede)
+	uv run --no-project python -m unittest discover -s infra/keycloak/tests -t infra/keycloak
 
 dev: ## Como o up, mas com hot reload do agro-web (fica em primeiro plano; Ctrl+C para sair)
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --watch

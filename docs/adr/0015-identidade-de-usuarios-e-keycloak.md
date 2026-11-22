@@ -1,6 +1,6 @@
 # ADR 0015: Identidade de usuários, SSO Inceres (Keycloak) e vínculo com a empresa
 
-- **Status:** aceito (2026-11-21). **Implementação em andamento:** o Keycloak compartilhado e o banco dedicado dele já rodam no projeto `infra-docker` (D1 e D8). O restante da Fase A (código da API, DER, realm do produto) ainda não foi iniciado.
+- **Status:** aceito (2026-11-21). **Implementação em andamento:** o Keycloak compartilhado e o banco dedicado dele rodam no projeto `infra-docker` (D1 e D8), e a **parte do produto no realm `inceres` está criada e verificada** (clients `agentes-agro` e `agentes-agro-provisioner`, 8 permissões, 3 papéis compostos e os grupos `/agentes-agro/...`; ver `infra/keycloak/`). O restante da Fase A (código da API, migrações a partir do DER) ainda não foi iniciado.
 - **Data:** 2026-11-21
 - **Histórico:** revisão 2 trouxe o realm `inceres` compartilhado e o client `agentes-agro`. A revisão 3 registra as respostas às perguntas: grupos por papel, **permissões no Keycloak**, logout **só do produto**, remoção do login por CPF, **telas inalteradas nesta entrega** e **sem Mailpit**. Aceito em 2026-11-21, com a decisão adicional de que o **Keycloak e o banco dele ficam no projeto `infra-docker`, compartilhados entre os produtos** (não no compose deste repositório).
 - **Complementa e ajusta:** ADR 0013 (empresas, papéis e permissões). A **origem do papel e das permissões** passa para o Keycloak (D3); empresa, escopo de fazendas e status no produto continuam da API, que segue aplicando a autorização em cada requisição. Fecha a pendência "fluxo de aceite de convite e definição de senha" do 0013 e o adendo "cookie do token de acesso" do 0010, que pedia ADR próprio.
@@ -136,6 +136,7 @@ Tabela `user_identities (user_id, issuer, subject)`, com `UNIQUE (issuer, subjec
 Criar, convidar, mudar papel, desativar e remover passa por portas pequenas declaradas em `usecase` (ISP, conforme o CLAUDE.md), por exemplo `IdentityProvisioner`, `InviteSender` e `ProductAccess` (adicionar e remover do grupo, encerrar sessões do produto).
 
 - Adaptador de produção: `adapter/keycloak`, pela **Admin REST API** com `net/http` da biblioteca padrão, autenticado pelo client `agentes-agro-provisioner` (*client credentials*).
+- **Requisito do Keycloak 26.8 (verificado):** a Admin API só aceita tokens cuja audiência inclui `…/admin/realms/<realm>`, o que o *client scope* `kc-admin-api` fornece. O client do provisionador o recebe como *scope* padrão; sem ele o token é emitido, mas a API responde `401`. O client usa `fullScopeAllowed` desligado (deprecado no 26.8) e **mapeamento de escopo explícito** para `manage-users` e `view-users`; assim o token só carrega `realm-management` (`manage-users`, `view-users`, `query-users`, `query-groups`), sem as roles `account` do escopo completo.
 - Testes usam **fakes** em memória (`tests/fakes/`). Não existe adaptador "local" de senha nem flag que desligue a autenticação.
 - **Nome e sobrenome:** o perfil de usuário padrão do Keycloak 26 **exige** `firstName` e `lastName` (sem eles a conta fica "não totalmente configurada" e não obtém token; verificado no `infra-docker`). O provisionador preenche os dois a partir de `users.name`; como a API guarda um nome só, a divisão é só para satisfazer o Keycloak (primeira palavra e o restante, com valor de reserva quando houver uma palavra só).
 - **Regras para um realm compartilhado:**
@@ -331,7 +332,7 @@ De dentro para fora, como pede o CLAUDE.md. **Fase A: backend, sem tocar o front
 2. `usecase`: portas (D5) e casos de uso (convidar, reenviar, cancelar, mudar papel, desativar, resolver principal, `GET /auth/me`), com fakes e teste de isolamento entre empresas.
 3. Migrações (golang-migrate) e repositórios (pgx + sqlc) conforme o [DER](../arquitetura/der-api.md), com teste de integração em banco descartável.
 4. `adapter/oidc` (callback, sessão, Bearer, renovação, revogação, *back-channel logout*) e `adapter/keycloak` (Admin REST).
-5. **Parte do produto no realm `inceres`** (o Keycloak em si já existe no `infra-docker`): client `agentes-agro` e `agentes-agro-provisioner`, *client roles* de permissão e papéis compostos, grupos `/agentes-agro/...` e *mappers*, aplicados de forma declarativa por um script deste repositório sobre a Admin API do Keycloak compartilhado; script de seed; `.env.example` com os nomes novos (URL do emissor, URL interna, credenciais do provisionador).
+5. **Parte do produto no realm `inceres`: feito** (`infra/keycloak/`, aplicada com `make keycloak` e verificada de ponta a ponta). Falta o script de seed de usuários de teste e os nomes de variáveis que a API vai ler (URL do emissor e URL interna, segredos dos clients), que já constam no `.env.example`.
 6. Contrato `openapi.yaml` (D9, Fase A) e **teste de contrato entre o `openapi.yaml` e o realm**. O mock e as telas **não** mudam.
 7. Comando `bootstrap` e roteiro de produção (aplicação declarativa no realm compartilhado).
 
@@ -341,8 +342,9 @@ De dentro para fora, como pede o CLAUDE.md. **Fase A: backend, sem tocar o front
 
 Decididas na revisão 3: grupos por papel; permissões como *client roles* no Keycloak; logout só do produto; BFF; remoção do login por CPF; telas inalteradas na Fase A; sem Mailpit.
 
-1. **Operação do Keycloak compartilhado em produção:** em desenvolvimento ele já roda no `infra-docker`. Falta definir quem opera o realm fora da máquina local, como o produto aplica a sua parte no realm compartilhado (script sobre a Admin API, Terraform ou *kcadm*; o item 5 do plano parte do script) e se o FGAP v2 está disponível. Define o ADR de infraestrutura.
+1. **Operação do Keycloak compartilhado em produção:** em desenvolvimento ele já roda no `infra-docker`, e o produto aplica a sua parte por script sobre a Admin API (`make keycloak`). Falta definir quem opera o realm fora da máquina local, se esse script serve em produção ou se entra Terraform ou *kcadm*, e se o FGAP v2 está disponível para restringir o provisionador aos grupos do produto. Define o ADR de infraestrutura.
 2. **Quando fazer a Fase B** (front), já que sem ela o front não autentica na API real.
+3. **Rotação de refresh token no realm:** `revokeRefreshToken` está **desligado** no `inceres`. O desenho da sessão (D6) a assume; ligar é decisão da plataforma, porque vale para todos os produtos.
 
 ## Aceite
 

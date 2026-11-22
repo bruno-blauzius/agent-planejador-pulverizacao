@@ -10,7 +10,7 @@ Monorepo de estudo de agentes de IA para o agro, mantido por um arquiteto de sof
 - `services/label-advisor` — agente RAG Python que responde sobre bulas e boletins técnicos
 - `services/api` — API em Go: BFF do front, dona dos dados de talhões e aplicações
 - `web` — front-end em Nuxt + Vue
-- `infra/` — Postgres local (`infra/docker/postgres/`: `postgresql.conf` e scripts de init) e, futuramente, Terraform
+- `infra/` — Postgres local (`infra/docker/postgres/`: `postgresql.conf` e scripts de init), a parte do produto no Keycloak (`infra/keycloak/`: clients, roles e grupos do `agentes-agro` no realm `inceres`, com o script que os aplica) e, futuramente, Terraform
 - `docs/projetos/` — o problema, as fases e a definição de pronto de cada agente
 - `docs/adr/` — decisões arquiteturais (ADRs 0007–0015 cobrem pre-commit, API Go, Docker/Postgres, contrato-primeiro no front, Vuetify, MapLibre, empresas/papéis, PostGIS+pgvector e identidade de usuários com o SSO Inceres (Keycloak))
 - `docs/arquitetura/` — probes de Kubernetes e o DER da API (`der-api.md`)
@@ -76,7 +76,8 @@ Estas regras existem porque agentes falham de forma silenciosa. Siga à risca:
 - Probes de Kubernetes ficam em /health/live, /health/startup e /health/ready; liveness nunca consulta dependências.
 - O contrato em `api/openapi.yaml` é atualizado **junto** com qualquer mudança de endpoint.
 - Endpoints consumidos pelos agentes são somente leitura, exceto o de registro de aplicação, que só é chamado após aprovação humana.
-- **Empresa é o tenant (ADR 0013).** Todo dado de negócio pertence a uma `Company`; todo endpoint e toda consulta filtram pela empresa do token e aplicam papel e escopo de fazendas. A API é a **única fonte de autorização**: `GET /auth/me` devolve `role`, `company`, `farm_scope` e `permissions`, e ações proibidas respondem `403`.
+- **Empresa é o tenant (ADR 0013).** Todo dado de negócio pertence a uma `Company`; todo endpoint e toda consulta filtram pela empresa do usuário e aplicam papel e escopo de fazendas. A API **aplica a autorização em toda requisição**: `GET /auth/me` devolve `role`, `company`, `farm_scope` e `permissions`, e ações proibidas respondem `403`.
+- **Identidade e papéis vêm do Keycloak (ADR 0015).** Login e conta são do SSO Inceres (realm `inceres`, client `agentes-agro`). O papel e as permissões vêm do token (*client roles* `resource_access.agentes-agro.roles`); `users.role` é só projeção. Empresa, escopo de fazendas e status no produto são da API. A tabela papel → permissões mora no `openapi.yaml` (`Permission`) **e** em `infra/keycloak/agentes-agro.json`; `make keycloak-test` falha se divergirem, e `make keycloak` aplica a mudança no Keycloak.
 
 ### Banco de dados (PostgreSQL)
 
@@ -152,6 +153,9 @@ make eval     # avaliações dos agentes (LLM real)
 make hooks    # instala pre-commit e pre-push (rode uma vez após clonar)
 make security # gitleaks, bandit, pip-audit, govulncheck em todo o repositório
 make audit    # CVEs no uv.lock de cada serviço Python
+make keycloak        # aplica no Keycloak do infra-docker (realm inceres) o client, as roles e os grupos do produto; gera os segredos que faltarem no .env
+make keycloak-check  # só compara com infra/keycloak/agentes-agro.json; sai com 1 se divergir
+make keycloak-test   # testes do script de aplicação (sem rede)
 ```
 
 Serviços Python (dentro de `services/spray-planner` ou `services/label-advisor`):
