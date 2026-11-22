@@ -42,6 +42,8 @@ func run() error {
 		Startup:      usecase.NewCheckStartup(lifecycle),
 		Readiness:    usecase.NewCheckReadiness(lifecycle, logger), // dependency probes are added in Phase 3
 		ProbeTimeout: cfg.ProbeTimeout,
+
+		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
 	}
 	if cfg.DocsEnabled {
 		deps.Spec = apispec.Spec

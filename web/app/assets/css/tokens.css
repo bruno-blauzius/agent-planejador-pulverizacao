@@ -1,0 +1,298 @@
+/*
+ * Design tokens — source: Figma "Agentes Agro", page "00 · Fundamentos" (0:1)
+ * and "Biblioteca de componentes" (22:2).
+ *
+ * Figma variable names are in Portuguese; CSS identifiers follow the repo rule
+ * (code in English). Mapping:
+ *   cor/verde-*      -> --color-green-*        cor/broto-*  -> --color-sprout-*
+ *   cor/cafe-*       -> --color-coffee-*       cor/neutro-* -> --color-white / sand / border
+ *   cor/texto-*      -> --color-text-*         cor/status-apta|atencao|inapta -> --color-status-suitable|attention|unsuitable
+ *   cor/info-chuva   -> --color-info-rain      espaco/*     -> --space-*
+ *   raio/*           -> --radius-*             Elevação/*   -> --shadow-*
+ *
+ * Colors: the palette lives in app/theme/palette.ts (single source, ADR 0011).
+ * Vuetify publishes it as --v-theme-<name>; the --color-* names below are
+ * aliases, so project components keep using them without duplicating hex values.
+ */
+:root {
+  /* Brand — green (coffee field) */
+  --color-green-950: rgb(var(--v-theme-green-950));
+  --color-green-900: rgb(var(--v-theme-green-900));
+  --color-green-800: rgb(var(--v-theme-green-800));
+  --color-green-700: rgb(var(--v-theme-green-700));
+  --color-green-600: rgb(var(--v-theme-green-600));
+  --color-green-100: rgb(var(--v-theme-green-100));
+
+  /* Accent — sprout green (agent / AI actions) */
+  --color-sprout-400: rgb(var(--v-theme-sprout-400));
+  --color-sprout-500: rgb(var(--v-theme-sprout-500));
+
+  /* Earth — coffee brown */
+  --color-coffee-700: rgb(var(--v-theme-coffee-700));
+  --color-coffee-600: rgb(var(--v-theme-coffee-600));
+  --color-coffee-100: rgb(var(--v-theme-coffee-100));
+
+  /* Neutrals */
+  --color-white: rgb(var(--v-theme-white));
+  --color-sand: rgb(var(--v-theme-sand));
+  --color-border: rgb(var(--v-theme-border));
+
+  /* Text */
+  --color-text-primary: rgb(var(--v-theme-text-primary));
+  --color-text-secondary: rgb(var(--v-theme-text-secondary));
+  --color-text-tertiary: rgb(var(--v-theme-text-tertiary));
+  --color-text-inverse: rgb(var(--v-theme-text-inverse));
+
+  /* Spray condition status */
+  --color-status-suitable: rgb(var(--v-theme-status-suitable));
+  --color-status-suitable-bg: rgb(var(--v-theme-status-suitable-bg));
+  --color-status-attention: rgb(var(--v-theme-status-attention));
+  --color-status-attention-bg: rgb(var(--v-theme-status-attention-bg));
+  --color-status-unsuitable: rgb(var(--v-theme-status-unsuitable));
+  --color-status-unsuitable-bg: rgb(var(--v-theme-status-unsuitable-bg));
+  --color-info-rain: rgb(var(--v-theme-info-rain));
+  --color-info-rain-bg: rgb(var(--v-theme-info-rain-bg));
+
+  /*
+   * Translucent variants. Figma applies opacity on top of the base variables
+   * (e.g. texto-inverso at 78%); color-mix keeps them tied to the base token.
+   */
+  --color-text-inverse-strong: color-mix(in srgb, var(--color-text-inverse) 78%, transparent);
+  --color-text-inverse-muted: color-mix(in srgb, var(--color-text-inverse) 65%, transparent);
+  --color-text-inverse-subtle: color-mix(in srgb, var(--color-text-inverse) 55%, transparent);
+  --color-text-inverse-faint: color-mix(in srgb, var(--color-text-inverse) 40%, transparent);
+  --color-surface-inverse-soft: color-mix(in srgb, var(--color-white) 6%, transparent);
+  --color-surface-inverse-hover: color-mix(in srgb, var(--color-white) 10%, transparent);
+  --color-surface-inverse-glass: color-mix(in srgb, var(--color-white) 7%, transparent);
+  --color-border-inverse-glass: color-mix(in srgb, var(--color-white) 14%, transparent);
+  --color-sprout-soft: color-mix(in srgb, var(--color-sprout-400) 15%, transparent);
+  --color-sprout-ring: color-mix(in srgb, var(--color-sprout-400) 60%, transparent);
+  /* Buttons floating over the map (Figma 7:184: white at 90%). */
+  --color-surface-over-map: color-mix(in srgb, var(--color-white) 90%, transparent);
+  /* Field label pill on the map (Figma 15:279: verde-950 at 70%). */
+  --color-map-label: color-mix(in srgb, var(--color-green-950) 70%, transparent);
+  /* Badge over the drawn field (Figma 16:407: verde-950 at 85%). */
+  --color-map-badge: color-mix(in srgb, var(--color-green-950) 85%, transparent);
+  --color-overlay: color-mix(in srgb, var(--color-green-950) 55%, transparent);
+  --color-text-inverse-lead: color-mix(in srgb, var(--color-text-inverse) 72%, transparent);
+  --color-text-inverse-body: color-mix(in srgb, var(--color-text-inverse) 70%, transparent);
+  --color-text-inverse-caption: color-mix(in srgb, var(--color-text-inverse) 60%, transparent);
+  --color-sprout-pill: color-mix(in srgb, var(--color-sprout-400) 14%, transparent);
+  --color-sprout-badge: color-mix(in srgb, var(--color-sprout-400) 18%, transparent);
+  /* Hover of the danger button: not in Figma, derived from the base token. */
+  --color-status-unsuitable-hover: color-mix(in srgb, var(--color-status-unsuitable) 88%, black);
+
+  /* Motion */
+  --duration-fast: 0.15s;
+  --duration-spinner: 0.7s;
+  /* Loading skeletons: pulse duration, dimmed opacity and line width. */
+  --duration-skeleton: 1.4s;
+  --opacity-skeleton-dim: 0.6;
+  --skeleton-line-width: 40%;
+  --easing-standard: ease;
+
+  /* Typography — font families; text styles live in typography.css */
+  --font-display: 'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+
+  /* Spacing — multiples of 2/4 (espaco/*) */
+  --space-2: 2px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-18: 18px;
+  --space-20: 20px;
+  --space-22: 22px;
+  --space-24: 24px;
+  --space-28: 28px;
+  --space-32: 32px;
+  --space-40: 40px;
+  --space-48: 48px;
+  --space-64: 64px;
+
+  /* Radius (raio/*) */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 28px;
+  --radius-pill: 999px;
+  /* Icon tiles (alert icon, logo mark, dropzone) and inner cards — not in raio/* */
+  --radius-tile: 10px;
+  --radius-tile-lg: 14px;
+  /* Summary cards of the farm list (Figma 7:118). */
+  --radius-card-lg: 20px;
+
+  /* Border widths */
+  --border-width-hairline: 1px;
+  --border-width-control: 1.5px;
+  --border-width-strong: 2px;
+  --border-width-indicator: 3px;
+  --border-width-heavy: 4px;
+
+  /* Component sizes (heights/edges from the Figma components) */
+  --size-control-lg: 56px;
+  --size-control-md: 48px;
+  --size-control-sm: 36px;
+  --size-topbar-control: 44px;
+  --size-segment: 38px;
+  --size-icon-tile-sm: 32px;
+  --size-icon-tile-md: 36px;
+  --size-icon-tile-lg: 48px;
+  --size-avatar-sm: 32px;
+  --size-avatar-md: 38px;
+  /* Profile identity (Figma 54:904) and its photo badge. */
+  --size-avatar-xl: 120px;
+  --profile-identity-width: 340px;
+  --profile-skeleton-height: 420px;
+  /* Search box inside a table card (Figma 39:635). */
+  --size-search-inline: 40px;
+  --size-status-dot: 8px;
+  --size-checkbox: 20px;
+  --size-checkbox-lg: 22px;
+  /* Selected radio: thick ring leaving a small white dot. */
+  --radio-dot-ring: 6px;
+  /* Chevron of the select box (Figma 24:172). */
+  --size-icon-select: 18px;
+  /* Switch (Figma "Interruptor" 25:136). */
+  --size-switch-width: 44px;
+  --size-switch-height: 26px;
+  --size-switch-thumb: 20px;
+  /* Progress bar track (Figma 26:178). */
+  --size-progress-track: 6px;
+  /* Paired form fields wrap below this width (375 px screens). */
+  --form-field-min-width: 220px;
+  /* Share input of the owner links: fits "12,5". */
+  --share-input-width: 5ch;
+  /* Share field of the wizard owner modal (Figma 41:1154). */
+  --wizard-share-field-width: 180px;
+  --farm-card-map-height: 180px;
+  --menu-min-width: 160px;
+  --empty-state-text-width: 440px;
+  /* Owner table columns (Figma 39:646). */
+  --owner-table-farms-width: 190px;
+  --owner-table-share-width: 70px;
+  --farm-map-view-height: 640px;
+  --farm-map-view-height-compact: 440px;
+  /* Farm detail, "Áreas e talhões" (Figma 15:183, 15:321, 15:334). */
+  --field-panel-width: 360px;
+  --size-legend-swatch: 10px;
+  --radius-legend-swatch: 3px;
+  --size-field-swatch-width: 10px;
+  --size-field-swatch-height: 34px;
+  --radius-field-swatch: 4px;
+  --map-popover-width: 280px;
+  /* New field form (Figma 16:420, 16:439). */
+  --field-form-panel-width: 380px;
+  /* Map height of the field form: viewport minus header/tabs, within these bounds. */
+  --field-form-map-min-height: 480px;
+  --field-form-map-max-height: 880px;
+  --field-form-map-offset: 328px;
+  --size-icon-tile-area: 40px;
+  --radius-popover: 18px;
+  --shadow-popover: 0 12px 16px rgb(13 20 8 / 25%);
+  --modal-width-md: 640px;
+  --modal-width-sm: 440px;
+  --size-brand-mark: 24px;
+  --size-spinner: 16px;
+
+  /* Odd paddings used literally by Figma components */
+  --padding-nav-item-y: 11px;
+  --padding-segment-y: 9px;
+  --padding-badge-y: 5px;
+  --padding-counter: 1px 7px;
+  /* Layer switch over the map (Figma 15:295). */
+  --padding-segment-contrast: 5px;
+  --padding-segment-contrast-option: 7px 12px;
+  /* Label pill of a field on the map (Figma 15:279). */
+  --padding-map-label: 3px 8px;
+
+  /* Glass effect (login hero card) */
+  --blur-glass: 12px;
+
+  /* Elevation — cards stay flat (border only); shadows only for floating items and modals */
+  --shadow-card: 0 2px 8px rgb(20 31 13 / 6%);
+  --shadow-floating: 0 12px 32px rgb(20 31 13 / 14%);
+  --shadow-modal: 0 24px 64px rgb(20 31 13 / 28%);
+  --shadow-segment: 0 1px 1.5px rgb(20 31 13 / 8%);
+
+  /* Focus ring (Figma: "anel verde-broto") */
+  --focus-ring: 0 0 0 3px var(--color-sprout-ring);
+
+  /* App shell (frame 7:16) */
+  /* --sidebar-width and --topbar-height come from app/theme/layout.ts (set by AppSidebar/AppTopbar). */
+  --content-padding-x: var(--space-40);
+  --topbar-search-width: 420px;
+  --page-header-main-min-width: 320px;
+  --notification-dot-top: 10px;
+  --notification-dot-right: 11px;
+
+  /* Above Vuetify's app bar and drawer (z-index up to 1004). */
+  --z-skip-link: 2000;
+
+  /* Auth layout (frame 6:16) */
+  --auth-form-width: 440px;
+  --auth-hero-padding-top: 52px;
+  --auth-hero-padding-x: 56px;
+  --auth-hero-message-offset: 82px;
+  --auth-hero-lead-width: 520px;
+  --auth-hero-card-width: 560px;
+
+  /* Temporary showcase grid */
+  --grid-min-column: 240px;
+
+  /* New-farm wizard (Figma 35:355, 14:30) */
+  --wizard-steps-width: 240px;
+  --wizard-preview-width: 280px;
+  --wizard-preview-map-height: 160px;
+  --wizard-intro-width: 500px;
+  --size-step-marker: 34px;
+  --wizard-step-connector-height: 30px;
+  --review-label-width: 150px;
+  --size-icon-tile-xl: 52px;
+  --color-green-tint: color-mix(in srgb, var(--color-green-100) 50%, transparent);
+  --wizard-map-height-md: 260px;
+  --wizard-map-height-lg: 320px;
+  --wizard-city-state-width: 90px;
+  --wizard-postal-code-width: 150px;
+  /* File icon tile of the imported perimeter card (Figma 37:793). */
+  --size-file-tile: 40px;
+  /* Chips over the map (Figma 14:263: verde-950 at 85%). */
+  --color-overlay-strong: color-mix(in srgb, var(--color-green-950) 85%, transparent);
+  --color-sprout-tint: color-mix(in srgb, var(--color-sprout-400) 12%, transparent);
+  --color-text-inverse-note: color-mix(in srgb, var(--color-text-inverse) 85%, transparent);
+}
+
+/* Phones: the 40 px page gutter of the 1440 px Figma leaves no room; 16 px, as the map overlays. */
+@media (max-width: 599px) {
+  :root {
+    --content-padding-x: var(--space-16);
+  }
+}
+
+/* Users table columns (Figma 52:402), including the 20 px cell padding on each side. */
+:root {
+  --user-table-role-width: 210px;
+  --user-table-company-width: 210px;
+  --user-table-access-width: 160px;
+  --user-table-status-width: 170px;
+  /* Companies table columns (Figma 52:966). */
+  --company-table-document-width: 170px;
+  --company-table-plan-width: 120px;
+  --company-table-count-width: 90px;
+  --company-table-status-width: 170px;
+  /* Dashboard (Figma 54:602): farm select, side column and the CSS bar chart. */
+  --dashboard-farm-select-width: 220px;
+  --dashboard-side-width: 380px;
+  --chart-plot-height: 130px;
+  --chart-label-height: 18px;
+  --size-chart-bar: 16px;
+  --size-chart-bar-sm: 6px;
+  --size-chart-swatch: 12px;
+  --radius-chart-bar: 3px;
+}

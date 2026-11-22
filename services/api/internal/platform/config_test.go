@@ -2,6 +2,7 @@ package platform_test
 
 import (
 	"log/slog"
+	"reflect"
 	"testing"
 	"time"
 
@@ -23,6 +24,8 @@ func TestLoadConfig(t *testing.T) {
 	}
 	lowestPort := defaults
 	lowestPort.Port = 1
+	withOrigins := defaults
+	withOrigins.CORSAllowedOrigins = []string{"http://localhost:3000", "https://app.example.com"}
 
 	tests := []struct {
 		name    string
@@ -52,6 +55,15 @@ func TestLoadConfig(t *testing.T) {
 		{name: "negative duration is rejected", env: map[string]string{"API_SHUTDOWN_TIMEOUT": "-1s"}, wantErr: true},
 		{name: "duration without unit is rejected", env: map[string]string{"API_PROBE_TIMEOUT": "5"}, wantErr: true},
 		{name: "invalid docs flag is rejected", env: map[string]string{"API_DOCS_ENABLED": "maybe"}, wantErr: true},
+		{
+			name: "cors origins are trimmed and empty items dropped",
+			env:  map[string]string{"API_CORS_ALLOWED_ORIGINS": " http://localhost:3000, ,https://app.example.com "},
+			want: withOrigins,
+		},
+		{name: "empty cors list keeps cors disabled", env: map[string]string{"API_CORS_ALLOWED_ORIGINS": ""}, want: defaults},
+		{name: "cors wildcard is rejected", env: map[string]string{"API_CORS_ALLOWED_ORIGINS": "*"}, wantErr: true},
+		{name: "cors origin with path is rejected", env: map[string]string{"API_CORS_ALLOWED_ORIGINS": "http://localhost:3000/app"}, wantErr: true},
+		{name: "cors origin without scheme is rejected", env: map[string]string{"API_CORS_ALLOWED_ORIGINS": "localhost:3000"}, wantErr: true},
 	}
 
 	for _, tt := range tests {
@@ -66,7 +78,7 @@ func TestLoadConfig(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got != tt.want {
+			if !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("config mismatch:\n got  %+v\n want %+v", got, tt.want)
 			}
 		})

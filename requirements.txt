@@ -1,3 +1,4 @@
 langchain==1.5.2
 langchain_openai==1.8.5
 langgraph==1.2.24
+requests==2.33.0

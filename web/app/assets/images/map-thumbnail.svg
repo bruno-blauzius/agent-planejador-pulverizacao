@@ -1,0 +1,14 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="540" height="180" viewBox="0 0 540 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Miniatura do mapa" clip-path="url(#clip0_0_4)">
+<path id="Vector" d="M540 0H0V180H540V0Z" fill="#26361A"/>
+<path id="Vector_2" d="M20 18L240 7.2L260 81L36 99L20 18Z" fill="#4E7A2B" stroke-width="1.41421" stroke="#E6EEDB" stroke-opacity="0.55"/>
+<path id="Vector_3" d="M260 7.2L500 3.6L524 72L280 82.8L260 7.2Z" fill="#3B5E21" stroke-width="1.41421" stroke="#E6EEDB" stroke-opacity="0.55"/>
+<path id="Vector_4" d="M40 106.2L264 88.2L284 176.4L60 180L40 106.2Z" fill="#6B8F35" stroke-width="1.41421" stroke="#E6EEDB" stroke-opacity="0.55"/>
+<path id="Vector_5" d="M284 86.4L528 75.6L536 180H304L284 86.4Z" fill="#8A7350" stroke-width="1.41421" stroke="#E6EEDB" stroke-opacity="0.55"/>
+</g>
+<defs>
+<clipPath id="clip0_0_4">
+<rect width="540" height="180" fill="white"/>
+</clipPath>
+</defs>
+</svg>

@@ -234,6 +234,7 @@ Pré-requisitos: Docker, uv, Go, Node.js com pnpm e uma chave de API de um prove
 ```bash
 cp .env.example .env        # preencher chaves
 make up                     # sobe Postgres e serviços
+make dev                    # idem, com hot reload do web
 make test                   # testes de todos os serviços
 make lint                   # ruff, mypy, golangci-lint, eslint
 make eval                   # avaliações dos agentes (usa LLM real, tem custo)

@@ -30,7 +30,7 @@ Até aqui, `web`, `spray-planner` e `label-advisor` eram só pastas vazias, sem 
   - `agro`: rede privada do projeto. É a única onde o Postgres é alcançável.
   - `inceres-infra` (externa): os quatro serviços de aplicação entram nela para usar Redis, Kafka e RabbitMQ.
   - Os serviços de nome genérico têm prefixo `agro-` (`agro-api`, `agro-web`, `agro-postgres`), para não colidir no DNS da rede compartilhada.
-- **Postgres** `pgvector/pgvector:pg17`, configurado como produção:
+- **Postgres** `pgvector/pgvector:pg17` (a partir do ADR 0014, imagem própria com PostGIS além do pgvector), configurado como produção:
   - Um banco por serviço (`api`, `label_advisor`), cada um com `<svc>_migrator` (dono, DDL) e `<svc>_app` (só DML, via default privileges).
   - `CONNECT` revogado de `PUBLIC`, então um serviço não conecta no banco do outro.
   - `scram-sha-256` em toda conexão por rede.

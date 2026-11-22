@@ -1,0 +1,42 @@
+// Vuetify SASS variables (ADR 0011, layer 3): removes the Material accent
+// globally. Values reference the CSS tokens (tokens.css / typography.css)
+// wherever Sass does not need to do arithmetic with them.
+@use 'vuetify/settings' with (
+  // Fonts
+  $body-font-family: var(--font-body),
+  $heading-font-family: var(--font-display),
+
+  // Radius. Sass multiplies the root radius to build its scale, so it must be a
+  // number: 12px mirrors --radius-md. The named scale points to the tokens.
+  $border-radius-root: 12px,
+  $rounded: (
+    'sm': var(--radius-sm),
+    'md': var(--radius-md),
+    'lg': var(--radius-lg),
+    'xl': var(--radius-xl),
+    'pill': var(--radius-pill),
+  ),
+
+  // Buttons (Figma "Botão" 2:186): no uppercase, no tracking, bold 15, md = 48.
+  $button-text-transform: none,
+  $button-text-letter-spacing: 0,
+  $button-font-weight: 700,
+  $button-height: 48px,
+  $button-border-radius: var(--radius-md),
+  $button-elevation: ('default': 0, 'hover': 0, 'active': 0),
+
+  // Fields (Figma "Campo de texto" 24:137): 48 px, 1.5 px border, radius md.
+  $input-control-height: 48px,
+  $field-control-height: 48px,
+  $field-border-radius: var(--radius-md),
+  $field-font-size: 16px,
+  $field-letter-spacing: 0,
+  $field-border-width: 1.5px,
+  $field-focused-border-width: 2px,
+  $field-outline-opacity: 1,
+  $input-details-padding-inline: 0,
+  $input-details-padding-above: 8px,
+  $input-details-font-size: 12px,
+  $input-details-letter-spacing: 0,
+  $input-details-min-height: 0,
+);

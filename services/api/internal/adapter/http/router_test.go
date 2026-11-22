@@ -172,6 +172,52 @@ func TestDocsRoutes(t *testing.T) {
 	}
 }
 
+func TestCORS(t *testing.T) {
+	const allowed = "http://localhost:3000"
+	tests := []struct {
+		name            string
+		origins         []string
+		method          string
+		headers         map[string]string
+		wantStatus      int
+		wantAllowOrigin string
+		wantPreflight   bool
+	}{
+		{"allowed origin on simple request", []string{allowed}, http.MethodGet, map[string]string{"Origin": allowed}, 200, allowed, false},
+		{"allowed origin on preflight", []string{allowed}, http.MethodOptions,
+			map[string]string{"Origin": allowed, "Access-Control-Request-Method": "POST"}, 204, allowed, true},
+		{"other origin gets no cors headers", []string{allowed}, http.MethodGet, map[string]string{"Origin": "https://evil.test"}, 200, "", false},
+		{"other origin preflight is not answered", []string{allowed}, http.MethodOptions,
+			map[string]string{"Origin": "https://evil.test", "Access-Control-Request-Method": "POST"}, 405, "", false},
+		{"no origin header is untouched", []string{allowed}, http.MethodGet, nil, 200, "", false},
+		{"cors disabled when list is empty", nil, http.MethodGet, map[string]string{"Origin": allowed}, 200, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := newDeps(discardLogger())
+			deps.CORSAllowedOrigins = tt.origins
+			response := do(httpadapter.NewRouter(deps), tt.method, "/health/live", tt.headers)
+
+			if response.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", response.Code, tt.wantStatus)
+			}
+			if got := response.Header().Get("Access-Control-Allow-Origin"); got != tt.wantAllowOrigin {
+				t.Errorf("Access-Control-Allow-Origin = %q, want %q", got, tt.wantAllowOrigin)
+			}
+			gotMethods := response.Header().Get("Access-Control-Allow-Methods")
+			if (gotMethods != "") != tt.wantPreflight {
+				t.Errorf("Access-Control-Allow-Methods = %q, preflight headers expected: %v", gotMethods, tt.wantPreflight)
+			}
+			if tt.wantPreflight && response.Header().Get("X-Request-Id") == "" {
+				t.Error("preflight response must carry the request id")
+			}
+			if len(tt.origins) > 0 && !strings.Contains(response.Header().Get("Vary"), "Origin") {
+				t.Errorf("Vary = %q, want it to include Origin", response.Header().Get("Vary"))
+			}
+		})
+	}
+}
+
 func TestErrorEnvelope(t *testing.T) {
 	tests := []struct {
 		name       string

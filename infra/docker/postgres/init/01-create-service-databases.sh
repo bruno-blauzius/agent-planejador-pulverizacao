@@ -48,8 +48,14 @@ create_service_database api "$API_DB_MIGRATOR_PASSWORD" "$API_DB_APP_PASSWORD"
 create_service_database label_advisor "$LABEL_ADVISOR_DB_MIGRATOR_PASSWORD" "$LABEL_ADVISOR_DB_APP_PASSWORD"
 
 # Extensões exigem superusuário, por isso são criadas aqui e não nas migrações.
+# vector (pgvector) fica no label_advisor; postgis (geometria dos talhões) na api.
+# A imagem traz as duas (infra/docker/postgres/Dockerfile), mas cada banco só
+# ganha a extensão de que precisa.
 run_sql --dbname label_advisor <<'SQL'
 CREATE EXTENSION IF NOT EXISTS vector;
+SQL
+run_sql --dbname api <<'SQL'
+CREATE EXTENSION IF NOT EXISTS postgis;
 SQL
 for database in postgres api label_advisor; do
   run_sql --dbname "$database" -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'

@@ -1,9 +1,12 @@
 PYTHON_SERVICES := services/spray-planner services/label-advisor
 
-.PHONY: hooks lint security audit up down build logs ps
+.PHONY: hooks lint security audit up dev down build logs ps
 
 up: ## Sobe Postgres, api, agentes e web (exige a network externa inceres-infra)
 	docker compose up -d --build
+
+dev: ## Como o up, mas com hot reload do agro-web (fica em primeiro plano; Ctrl+C para sair)
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --watch
 
 down: ## Derruba os containers e mantém o volume do banco
 	docker compose down

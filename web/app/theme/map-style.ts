@@ -1,0 +1,195 @@
+import type { ExpressionSpecification, StyleSpecification } from 'maplibre-gl'
+import type { GeoJsonPosition, PerimeterGeometry } from '~/types/geo'
+import type { SprayCondition } from '~/types/spray'
+import { palette } from './palette'
+
+/**
+ * Map style of the app (ADR 0012), generated from palette.ts so the map uses
+ * the same single source of colors as the rest of the UI (ADR 0011).
+ * Reproduces the dark "coffee green" background of the Figma (7:174, 15:265):
+ * dark land, slightly darker water/vegetation, faint roads, no labels.
+ *
+ * Only type imports from maplibre-gl here: the library itself is loaded on the
+ * client by components/map/.
+ */
+
+export type MapBasemap = 'vector' | 'satellite'
+export type MapColorBy = 'crop' | 'status'
+
+export const MAP_ATTRIBUTION = '© OpenFreeMap © OpenMapTiles © colaboradores do OpenStreetMap'
+
+export const SOURCE_BASEMAP = 'basemap'
+export const SOURCE_SATELLITE = 'satellite'
+export const SOURCE_FEATURES = 'features'
+export const LAYER_FEATURES_FILL = 'features-fill'
+export const LAYER_FEATURES_OUTLINE = 'features-outline'
+export const LAYER_FEATURES_SELECTED = 'features-selected'
+
+/** Field fills of the Figma map, cycled per crop (legend 15:321). */
+export const MAP_FIELD_COLORS: readonly string[] = [
+  palette['map-field-1'],
+  palette['map-field-2'],
+  palette['map-field-3'],
+  palette['map-field-4'],
+  palette['map-field-5'],
+  palette['map-field-6'],
+]
+
+/** Field fills when coloring by spray status (legend of the "Status" layer). */
+export const STATUS_COLORS: Readonly<Record<SprayCondition, string>> = {
+  suitable: palette['status-suitable'],
+  attention: palette['status-attention'],
+  unsuitable: palette['status-unsuitable'],
+  rain: palette['info-rain'],
+}
+
+interface StyleOptions {
+  tilesUrl: string
+  satelliteUrl: string
+  basemap: MapBasemap
+}
+
+/** Base style: vector basemap (or satellite raster) without any data layer. */
+export function createMapStyle({ tilesUrl, satelliteUrl, basemap }: StyleOptions): StyleSpecification {
+  const showSatellite = basemap === 'satellite' && Boolean(satelliteUrl)
+  return {
+    version: 8,
+    sources: {
+      [SOURCE_BASEMAP]: { type: 'vector', url: tilesUrl },
+      ...(satelliteUrl
+        ? { [SOURCE_SATELLITE]: { type: 'raster', tiles: [satelliteUrl], tileSize: 256 } }
+        : {}),
+    },
+    layers: [
+      { id: 'land', type: 'background', paint: { 'background-color': palette['map-land'] } },
+      {
+        id: 'vegetation',
+        type: 'fill',
+        source: SOURCE_BASEMAP,
+        'source-layer': 'landcover',
+        filter: ['in', ['get', 'class'], ['literal', ['wood', 'forest', 'grass', 'wetland']]],
+        paint: { 'fill-color': palette['map-land-shade'], 'fill-opacity': 0.7 },
+      },
+      {
+        id: 'water',
+        type: 'fill',
+        source: SOURCE_BASEMAP,
+        'source-layer': 'water',
+        paint: { 'fill-color': palette['map-land-shade'] },
+      },
+      {
+        id: 'roads',
+        type: 'line',
+        source: SOURCE_BASEMAP,
+        'source-layer': 'transportation',
+        filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'track']]],
+        paint: {
+          'line-color': palette['map-road'],
+          'line-opacity': 0.35,
+          'line-width': ['interpolate', ['linear'], ['zoom'], 8, 0.5, 14, 2, 18, 4],
+        },
+      },
+      ...(showSatellite
+        ? [{ id: 'satellite', type: 'raster' as const, source: SOURCE_SATELLITE }]
+        : []),
+    ],
+  }
+}
+
+/** Fill color per feature: by spray status (from the API) or by crop index. */
+export function featureFillColor(colorBy: MapColorBy): ExpressionSpecification {
+  if (colorBy === 'status') {
+    return [
+      'match',
+      ['get', 'status'],
+      'suitable', STATUS_COLORS.suitable,
+      'attention', STATUS_COLORS.attention,
+      'unsuitable', STATUS_COLORS.unsuitable,
+      'rain', STATUS_COLORS.rain,
+      palette['map-field-1'],
+    ]
+  }
+  // `literal` keeps the palette as plain strings; `to-color` turns the picked one into a color.
+  return [
+    'to-color',
+    ['at', ['%', ['coalesce', ['get', 'cropIndex'], 0], MAP_FIELD_COLORS.length], ['literal', [...MAP_FIELD_COLORS]]],
+  ]
+}
+
+export const FEATURE_OUTLINE_COLOR = palette['green-100']
+export const FEATURE_SELECTED_COLOR = palette['sprout-400']
+
+/** Polygon styling of the Figma map (15:265): fills, 1.2 px light outline, 4 px selection. */
+export const FEATURE_FILL_OPACITY = 0.9
+export const FEATURE_OUTLINE_OPACITY = 0.5
+export const FEATURE_OUTLINE_WIDTH = 1.2
+export const FEATURE_SELECTED_WIDTH = 4
+/** Closest zoom when fitting to geometries (avoids zooming into a single small field). */
+export const FIT_MAX_ZOOM = 17
+
+/** Fill of a crop color slot, shared by the map, the legend and the field list. */
+export function fieldColor(cropIndex: number | undefined): string {
+  return MAP_FIELD_COLORS[toCropIndex(cropIndex) % MAP_FIELD_COLORS.length] ?? palette['map-field-1']
+}
+
+/** Crop color slot: a non-negative integer, so the palette lookup is always valid. */
+export function toCropIndex(value: number | undefined): number {
+  return Number.isInteger(value) && (value ?? 0) >= 0 ? (value ?? 0) : 0
+}
+
+/** [west, south, east, north] of the given geometries, or null when empty. */
+export function boundsOf(geometries: readonly PerimeterGeometry[]): [number, number, number, number] | null {
+  const positions: GeoJsonPosition[] = []
+  for (const geometry of geometries) {
+    const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates
+    for (const polygon of polygons) {
+      for (const ring of polygon) positions.push(...ring)
+    }
+  }
+  if (positions.length === 0) return null
+  let [west, south] = positions[0] ?? [0, 0]
+  let [east, north] = [west, south]
+  for (const [lng, lat] of positions) {
+    west = Math.min(west, lng)
+    east = Math.max(east, lng)
+    south = Math.min(south, lat)
+    north = Math.max(north, lat)
+  }
+  return [west, south, east, north]
+}
+
+/**
+ * Point where the label pill of a polygon sits: area-weighted centroid of the
+ * largest outer ring (fields are close to convex), falling back to the ring
+ * average for degenerate rings. Presentation geometry only.
+ */
+export function labelAnchorOf(geometry: PerimeterGeometry): GeoJsonPosition | null {
+  const rings = geometry.type === 'Polygon' ? [geometry.coordinates[0]] : geometry.coordinates.map((polygon) => polygon[0])
+  let best: { area: number, anchor: GeoJsonPosition } | null = null
+  for (const ring of rings) {
+    if (!ring || ring.length < 3) continue
+    const candidate = ringCentroid(ring)
+    if (!best || candidate.area > best.area) best = candidate
+  }
+  return best?.anchor ?? null
+}
+
+function ringCentroid(ring: readonly GeoJsonPosition[]): { area: number, anchor: GeoJsonPosition } {
+  let doubleArea = 0
+  let cx = 0
+  let cy = 0
+  for (let index = 0; index < ring.length - 1; index++) {
+    const [x1, y1] = ring[index] ?? [0, 0]
+    const [x2, y2] = ring[index + 1] ?? [0, 0]
+    const cross = x1 * y2 - x2 * y1
+    doubleArea += cross
+    cx += (x1 + x2) * cross
+    cy += (y1 + y2) * cross
+  }
+  if (Math.abs(doubleArea) < Number.EPSILON) {
+    const count = ring.length
+    const sum = ring.reduce<[number, number]>((acc, [x, y]) => [acc[0] + x, acc[1] + y], [0, 0])
+    return { area: 0, anchor: [sum[0] / count, sum[1] / count] }
+  }
+  return { area: Math.abs(doubleArea / 2), anchor: [cx / (3 * doubleArea), cy / (3 * doubleArea)] }
+}

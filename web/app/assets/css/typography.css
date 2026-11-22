@@ -1,0 +1,223 @@
+/*
+ * Text styles. Each style is a `font` shorthand token (weight size/line-height
+ * family) plus a tracking token when needed, and a `.text-*` class that applies
+ * both. Components use the class in templates, or `font: var(--font-*)` in
+ * scoped CSS when the style changes with state (e.g. active tab).
+ *
+ * Library styles (Figma 22:2): display, h2–h4, metric, body-*, label-field,
+ * label-strong, label-button(-sm), label-badge, overline.
+ * The others are styles used by screens/components without a library style;
+ * names describe their role.
+ *
+ * Figma letter-spacing is in percent, hence the `em` values.
+ */
+:root {
+  /* Library styles */
+  --font-display-lg: 800 56px/60px var(--font-display);
+  --tracking-display-lg: -0.03em;
+  --font-h2: 700 32px/36px var(--font-display);
+  --tracking-h2: -0.025em;
+  --font-h3: 700 24px/30px var(--font-display);
+  --tracking-h3: -0.02em;
+  --font-h4: 700 18px/24px var(--font-display);
+  --tracking-h4: -0.01em;
+  --font-metric: 700 20px/24px var(--font-display);
+  --tracking-metric: -0.01em;
+  --font-body-lg: 400 16px/24px var(--font-body);
+  --font-body-md: 400 14px/21px var(--font-body);
+  --font-body-sm: 400 12px/18px var(--font-body);
+  --font-label-field: 600 13px/18px var(--font-body);
+  --font-label-strong: 700 14px/20px var(--font-body);
+  --font-label-button: 700 15px/20px var(--font-body);
+  --font-label-button-sm: 700 13px/18px var(--font-body);
+  --font-label-badge: 700 12px/16px var(--font-body);
+  --font-overline: 700 11px/14px var(--font-body);
+  --tracking-overline: 0.1em;
+  /* Sidebar section label (Figma 7:28): overline with wider tracking. */
+  --tracking-overline-wide: 0.12em;
+  /* Table header labels (Figma 39:646). */
+  --tracking-overline-table: 0.08em;
+
+  /* Screen / component styles */
+  --font-page-title: 700 40px/44px var(--font-display);
+  --tracking-page-title: -0.015em;
+  --font-page-title-sm: 700 36px/40px var(--font-display);
+  --tracking-page-title-sm: -0.012em;
+  --font-hero: 800 clamp(48px, 5.6vw, 80px)/0.975 var(--font-display);
+  --tracking-hero: -0.03em;
+  --font-metric-lg: 700 34px/38px var(--font-display);
+  --font-title-sm: 700 16px/19px var(--font-display);
+  /* Farm card title (Figma 7:192). */
+  --font-title-md: 700 22px/26px var(--font-display);
+  --tracking-title-md: -0.005em;
+  --font-logo-primary: 800 17px/17px var(--font-display);
+  --font-logo-secondary: 600 17px/17px var(--font-display);
+  --font-body-xl: 400 18px/28px var(--font-body);
+  /* Figma "Corpo · Jakarta Regular 15" (foundations 2:158). */
+  --font-body-base: 400 15px/22px var(--font-body);
+  --font-brand-mark: 800 14px/1 var(--font-display);
+  --font-caption: 400 12px/16px var(--font-body);
+  --font-caption-xs: 400 11px/14px var(--font-body);
+  --font-caption-md: 400 13px/16px var(--font-body);
+  --font-nav-item: 500 14px/20px var(--font-body);
+  --font-label-md: 600 14px/18px var(--font-body);
+  --font-label-md-strong: 700 14px/18px var(--font-body);
+  --font-label-meta: 600 13px/16px var(--font-body);
+  --font-label-meta-strong: 700 13px/16px var(--font-body);
+  --font-label-counter: 700 11px/14px var(--font-body);
+  /* Farm tags of the owner table (Figma 39:661). */
+  --font-label-tag: 600 11px/14px var(--font-body);
+  --font-label-shortcut: 600 11px/14px var(--font-body);
+  --font-label-micro: 700 10px/13px var(--font-body);
+  /* Info chips of the farm card (Figma 7:204). */
+  --font-label-chip: 600 12px/15px var(--font-body);
+  /* Draft status of the wizard steps (Figma 35:486). */
+  --font-label-caption: 500 12px/16px var(--font-body);
+}
+
+.text-display {
+  font: var(--font-display-lg);
+  letter-spacing: var(--tracking-display-lg);
+}
+
+.text-page-title {
+  font: var(--font-page-title);
+  letter-spacing: var(--tracking-page-title);
+}
+
+.text-page-title-sm {
+  font: var(--font-page-title-sm);
+  letter-spacing: var(--tracking-page-title-sm);
+}
+
+.text-hero {
+  font: var(--font-hero);
+  letter-spacing: var(--tracking-hero);
+}
+
+.text-h2 {
+  font: var(--font-h2);
+  letter-spacing: var(--tracking-h2);
+}
+
+.text-h3 {
+  font: var(--font-h3);
+  letter-spacing: var(--tracking-h3);
+}
+
+.text-h4 {
+  font: var(--font-h4);
+  letter-spacing: var(--tracking-h4);
+}
+
+.text-metric {
+  font: var(--font-metric);
+  letter-spacing: var(--tracking-metric);
+}
+
+.text-metric-lg {
+  font: var(--font-metric-lg);
+}
+
+.text-title-md {
+  font: var(--font-title-md);
+  letter-spacing: var(--tracking-title-md);
+}
+
+.text-title-sm {
+  font: var(--font-title-sm);
+}
+
+.text-body-xl {
+  font: var(--font-body-xl);
+}
+
+.text-body-base {
+  font: var(--font-body-base);
+}
+
+.text-body-lg {
+  font: var(--font-body-lg);
+}
+
+.text-body-md {
+  font: var(--font-body-md);
+}
+
+.text-body-sm {
+  font: var(--font-body-sm);
+}
+
+.text-caption {
+  font: var(--font-caption);
+}
+
+.text-caption-md {
+  font: var(--font-caption-md);
+}
+
+.text-caption-xs {
+  font: var(--font-caption-xs);
+}
+
+.text-label-caption {
+  font: var(--font-label-caption);
+}
+
+.text-label-field {
+  font: var(--font-label-field);
+}
+
+.text-label-strong {
+  font: var(--font-label-strong);
+}
+
+.text-label-button {
+  font: var(--font-label-button);
+}
+
+.text-label-button-sm {
+  font: var(--font-label-button-sm);
+}
+
+.text-label-badge {
+  font: var(--font-label-badge);
+}
+
+.text-label-md {
+  font: var(--font-label-md);
+}
+
+.text-label-meta {
+  font: var(--font-label-meta);
+}
+
+.text-label-meta-strong {
+  font: var(--font-label-meta-strong);
+}
+
+.text-label-tag {
+  font: var(--font-label-tag);
+}
+
+.text-label-counter {
+  font: var(--font-label-counter);
+}
+
+.text-label-shortcut {
+  font: var(--font-label-shortcut);
+}
+
+.text-label-chip {
+  font: var(--font-label-chip);
+}
+
+.text-label-micro {
+  font: var(--font-label-micro);
+}
+
+.text-overline {
+  font: var(--font-overline);
+  letter-spacing: var(--tracking-overline);
+  text-transform: uppercase;
+}

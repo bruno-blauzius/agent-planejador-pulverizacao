@@ -16,6 +16,8 @@ type RouterDeps struct {
 	Readiness    ReadinessChecker
 	ProbeTimeout time.Duration // bounds the context passed to Readiness
 	Spec         []byte        // openapi.yaml content; empty disables the docs routes
+
+	CORSAllowedOrigins []string // exact origins allowed by CORS; empty disables CORS
 }
 
 // router registers GET routes and remembers which methods each path accepts.
@@ -45,6 +47,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 	routes.mux.HandleFunc("/", routes.notFoundOrMethodNotAllowed)
 
 	var handler http.Handler = routes.mux
+	handler = corsMiddleware(deps.CORSAllowedOrigins, handler)
 	handler = accessLogMiddleware(deps.Logger, handler)
 	handler = requestIDMiddleware(handler)
 	return recoverMiddleware(deps.Logger, handler)

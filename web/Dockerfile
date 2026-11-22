@@ -10,6 +10,19 @@ COPY package.json pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --ignore-scripts
 
+# Hot reload (docker-compose.dev.yml): `nuxt dev` with sources synced in by
+# `docker compose watch`, so file events fire inside the container even on
+# Windows hosts, where bind mounts do not propagate inotify.
+FROM base AS dev
+ENV HOST=0.0.0.0 \
+    PORT=3000
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --chown=node:node . .
+RUN chown node:node /app
+USER node
+EXPOSE 3000
+CMD ["pnpm", "exec", "nuxt", "dev"]
+
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .

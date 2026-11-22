@@ -5,7 +5,9 @@ package platform
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -21,12 +23,13 @@ const (
 
 // Config is the immutable runtime configuration of the API.
 type Config struct {
-	Port              int
-	LogLevel          slog.Level
-	ReadHeaderTimeout time.Duration
-	ShutdownTimeout   time.Duration
-	ProbeTimeout      time.Duration
-	DocsEnabled       bool
+	Port               int
+	LogLevel           slog.Level
+	ReadHeaderTimeout  time.Duration
+	ShutdownTimeout    time.Duration
+	ProbeTimeout       time.Duration
+	DocsEnabled        bool
+	CORSAllowedOrigins []string
 }
 
 // LookupFunc matches os.LookupEnv, so tests can inject a fake environment.
@@ -34,7 +37,8 @@ type LookupFunc func(key string) (string, bool)
 
 // LoadConfig reads the configuration from environment variables:
 // API_PORT, API_LOG_LEVEL, API_READ_HEADER_TIMEOUT, API_SHUTDOWN_TIMEOUT,
-// API_PROBE_TIMEOUT and API_DOCS_ENABLED.
+// API_PROBE_TIMEOUT, API_DOCS_ENABLED and API_CORS_ALLOWED_ORIGINS (comma
+// separated origins such as http://localhost:3000; unset or empty disables CORS).
 func LoadConfig(lookup LookupFunc) (Config, error) {
 	cfg := Config{
 		Port:              defaultPort,
@@ -87,5 +91,36 @@ func LoadConfig(lookup LookupFunc) (Config, error) {
 		cfg.DocsEnabled = enabled
 	}
 
+	if raw, ok := lookup("API_CORS_ALLOWED_ORIGINS"); ok {
+		origins, err := parseOrigins(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("invalid API_CORS_ALLOWED_ORIGINS %q: %w", raw, err)
+		}
+		cfg.CORSAllowedOrigins = origins
+	}
+
 	return cfg, nil
+}
+
+// parseOrigins accepts only bare origins (scheme://host[:port]). Wildcards and
+// paths are rejected so a typo cannot silently open the API to every site.
+func parseOrigins(raw string) ([]string, error) {
+	var origins []string
+	for _, item := range strings.Split(raw, ",") {
+		origin := strings.TrimSpace(item)
+		if origin == "" {
+			continue
+		}
+		parsed, err := url.Parse(origin)
+		if err != nil {
+			return nil, fmt.Errorf("origin %q: %w", origin, err)
+		}
+		isBareOrigin := (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+			parsed.Host != "" && parsed.Path == "" && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.User == nil
+		if !isBareOrigin {
+			return nil, fmt.Errorf("origin %q must look like https://app.example.com (no wildcard, path or query)", origin)
+		}
+		origins = append(origins, origin)
+	}
+	return origins, nil
 }

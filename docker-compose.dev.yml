@@ -1,0 +1,36 @@
+# Override de desenvolvimento: hot reload do agro-web.
+#   make dev    equivale a: docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build --watch
+#
+# O código de ./web é sincronizado para dentro do container pelo
+# `develop.watch` (em vez de bind mount), porque no Windows o bind mount não
+# propaga eventos de arquivo e o Vite não perceberia as mudanças.
+
+services:
+  agro-web:
+    build:
+      context: ./web
+      target: dev
+    image: agentes-agro/web:dev-watch
+    # `nuxt dev` escreve em .nuxt e em caches do node_modules.
+    read_only: false
+    environment:
+      NODE_ENV: development
+    develop:
+      watch:
+        - action: sync
+          path: ./web
+          target: /app
+          ignore:
+            - node_modules/
+            - .nuxt/
+            - .output/
+            - package.json
+            - pnpm-lock.yaml
+        # Dependências novas exigem reinstalar: refaz a imagem.
+        - action: rebuild
+          path: ./web/package.json
+        - action: rebuild
+          path: ./web/pnpm-lock.yaml
+    healthcheck:
+      # A primeira compilação do `nuxt dev` é mais lenta que o .output.
+      start_period: 90s

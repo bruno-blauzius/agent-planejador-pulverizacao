@@ -13,6 +13,24 @@ tags:
     description: Sondas de saúde usadas pelo Kubernetes (liveness, startup e readiness).
   - name: Docs
     description: Contrato e documentação interativa. Disponíveis apenas quando `API_DOCS_ENABLED=true`.
+  - name: Auth
+    description: Autenticação do usuário do front. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+  - name: Farms
+    description: Cadastro de fazendas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+  - name: Fields
+    description: Talhões de uma fazenda. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+  - name: Owners
+    description: Proprietários (pessoa física ou jurídica) e vínculos com fazendas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+  - name: Crops
+    description: Catálogo de culturas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+  - name: Users
+    description: Usuários, papéis e convites (ADR 0013). **Ainda não implementado** (planned).
+  - name: Companies
+    description: Empresas clientes, gestão do super admin (ADR 0013). **Ainda não implementado** (planned).
+  - name: Profile
+    description: Perfil do usuário autenticado (ADR 0013). **Ainda não implementado** (planned).
+  - name: Dashboard
+    description: Painel do administrador (ADR 0013). **Ainda não implementado** (planned).
 paths:
   /health/live:
     get:
@@ -131,7 +149,1003 @@ paths:
           $ref: "#/components/responses/MethodNotAllowed"
         "500":
           $ref: "#/components/responses/InternalError"
+  # ---------------------------------------------------------------------------
+  # Endpoints planejados (contrato primeiro, ADR 0010). Ainda não implementados
+  # no Go; o front usa uma implementação em memória até lá.
+  # ---------------------------------------------------------------------------
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      x-status: planned
+      summary: Autentica com e-mail ou CPF e senha
+      description: |
+        Ainda não implementado. Troca credenciais por um token de acesso Bearer.
+        `identifier` aceita e-mail ou CPF (com ou sem máscara). Com `remember_me: true`
+        ("Manter conectado") a API devolve um `expires_at` mais longo; o front alinha a
+        validade do cookie a esse valor.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Credenciais válidas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/me:
+    get:
+      tags: [Auth]
+      operationId: getCurrentUser
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Usuário autenticado
+      description: Ainda não implementado. Devolve o usuário dono do token enviado.
+      responses:
+        "200":
+          description: Usuário autenticado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms:
+    get:
+      tags: [Farms]
+      operationId: listFarms
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Lista fazendas
+      description: Ainda não implementado. Lista paginada de fazendas visíveis ao usuário.
+      parameters:
+        - name: search
+          in: query
+          description: Busca por nome, código ou município (sem diferenciar maiúsculas e acentos).
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/FarmStatus"
+        - name: production_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProductionType"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Página de fazendas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmSummaryPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Farms]
+      operationId: createFarm
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Cadastra fazenda
+      description: |
+        Ainda não implementado. Cria a fazenda (assistente de 4 passos). Com `status: draft`
+        os campos de localização e proprietários podem faltar; com `status: active` a API
+        exige perímetro e participações de proprietários somando 100%.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FarmInput"
+      responses:
+        "201":
+          description: Fazenda criada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Farm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+    get:
+      tags: [Farms]
+      operationId: getFarm
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Detalhe da fazenda
+      description: Ainda não implementado.
+      responses:
+        "200":
+          description: Fazenda.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Farm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Farms]
+      operationId: updateFarm
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Atualiza fazenda
+      description: Ainda não implementado. Substitui os dados editáveis da fazenda (mesmas regras do cadastro).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FarmInput"
+      responses:
+        "200":
+          description: Fazenda atualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Farm"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /perimeter-imports:
+    post:
+      tags: [Farms]
+      operationId: importFarmPerimeter
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Importa perímetro de arquivo
+      description: |
+        Ainda não implementado. Recebe um arquivo KML, KMZ, GeoJSON ou Shapefile compactado (.zip)
+        e devolve o perímetro normalizado em GeoJSON (WGS84), a área calculada em hectares e o
+        ponto de previsão (centróide). Não persiste nada: o resultado é enviado depois em `POST /farms`.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Arquivo .kml, .kmz, .geojson/.json ou .zip (Shapefile). Até 20 MB.
+      responses:
+        "200":
+          description: Perímetro extraído.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PerimeterImport"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/fields:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+    get:
+      tags: [Fields]
+      operationId: listFarmFields
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Lista talhões da fazenda
+      description: Ainda não implementado. Todos os talhões da fazenda, com o bloco (área) de cada um.
+      responses:
+        "200":
+          description: Talhões da fazenda.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Field"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Fields]
+      operationId: createField
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Cadastra talhão
+      description: Ainda não implementado. A área em hectares é calculada pela API a partir do polígono.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldInput"
+      responses:
+        "201":
+          description: Talhão criado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Field"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/fields/{fieldId}:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/FieldId"
+    put:
+      tags: [Fields]
+      operationId: updateField
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Atualiza talhão
+      description: >-
+        Ainda não implementado. Substitui os dados editáveis do talhão (mesmo corpo do cadastro).
+        A área e o estande são recalculados pela API; condição de aplicação e última aplicação não são editáveis.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldInput"
+      responses:
+        "200":
+          description: Talhão atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Field"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /crops:
+    get:
+      tags: [Crops]
+      operationId: listCrops
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Catálogo de culturas
+      description: Ainda não implementado. Culturas disponíveis para o cadastro de talhões.
+      responses:
+        "200":
+          description: Culturas.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Crop"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /owners:
+    get:
+      tags: [Owners]
+      operationId: listOwners
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Lista proprietários
+      description: Ainda não implementado. Lista paginada com os vínculos resumidos de cada proprietário.
+      parameters:
+        - name: search
+          in: query
+          description: Busca por nome/razão social ou CPF/CNPJ (com ou sem máscara).
+          schema:
+            type: string
+        - name: person_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/PersonType"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Página de proprietários.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerSummaryPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Owners]
+      operationId: createOwner
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Cadastra proprietário
+      description: Ainda não implementado. A API valida o CPF/CNPJ (dígitos verificadores) e rejeita duplicados com 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerInput"
+      responses:
+        "201":
+          description: Proprietário criado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Owner"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /owners/{ownerId}:
+    parameters:
+      - $ref: "#/components/parameters/OwnerId"
+    get:
+      tags: [Owners]
+      operationId: getOwner
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Detalhe do proprietário
+      description: Ainda não implementado.
+      responses:
+        "200":
+          description: Proprietário.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Owner"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Owners]
+      operationId: updateOwner
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Atualiza proprietário
+      description: Ainda não implementado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerInput"
+      responses:
+        "200":
+          description: Proprietário atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Owner"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /owners/{ownerId}/links:
+    parameters:
+      - $ref: "#/components/parameters/OwnerId"
+    get:
+      tags: [Owners]
+      operationId: getOwnerLinks
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Vínculos do proprietário com fazendas
+      description: Ainda não implementado.
+      responses:
+        "200":
+          description: Vínculos atuais.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerFarmLinkList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Owners]
+      operationId: replaceOwnerLinks
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Substitui os vínculos do proprietário
+      description: |
+        Ainda não implementado. Substitui todos os vínculos do proprietário. A API rejeita com 422
+        se a participação total de alguma fazenda passar de 100%.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [links]
+              properties:
+                links:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/OwnerFarmLinkInput"
+      responses:
+        "200":
+          description: Vínculos atualizados.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerFarmLinkList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  # ---------------------------------------------------------------------------
+  # Página 03: administração, painel e perfil (ADR 0013). Planned (ADR 0010).
+  # ---------------------------------------------------------------------------
+  /users:
+    get:
+      tags: [Users]
+      operationId: listUsers
+      x-status: planned
+      x-permission: users.manage
+      security:
+        - bearerAuth: []
+      summary: Lista usuários e convites pendentes
+      description: |
+        Ainda não implementado. Usuários e convites pendentes (`status: invited`) visíveis ao chamador.
+        Administrador vê só a própria empresa; super admin (`users.manage_all`) vê todas e pode filtrar por `company_id`.
+      parameters:
+        - name: search
+          in: query
+          description: Busca por nome, e-mail ou empresa.
+          schema:
+            type: string
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserRole"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserStatus"
+        - name: company_id
+          in: query
+          description: Só super admin; para os demais é sempre a própria empresa.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Página de usuários.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccountPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /users/summary:
+    get:
+      tags: [Users]
+      operationId: getUsersSummary
+      x-status: planned
+      x-permission: users.manage
+      security:
+        - bearerAuth: []
+      summary: Contagem de usuários por papel
+      description: Ainda não implementado. Mesmo escopo de `GET /users` (cartões de papel da tela Usuários).
+      responses:
+        "200":
+          description: Resumo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsersSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /users/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Users]
+      operationId: updateUser
+      x-status: planned
+      x-permission: users.manage
+      security:
+        - bearerAuth: []
+      summary: Altera papel, empresa, escopo ou status
+      description: |
+        Ainda não implementado. Administrador só altera usuários da própria empresa, não atribui `super_admin`
+        e não troca a empresa (403 `forbidden`). Usuário de outra empresa responde 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: Usuário atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /invitations:
+    post:
+      tags: [Users]
+      operationId: createInvitation
+      x-status: planned
+      x-permission: users.manage
+      security:
+        - bearerAuth: []
+      summary: Convida um usuário por e-mail
+      description: |
+        Ainda não implementado. Envia o e-mail para a pessoa criar a senha e devolve a linha do usuário
+        com `status: invited`. Mesmas restrições de papel/empresa de `PATCH /users/{userId}`. E-mail já usado responde 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InvitationInput"
+      responses:
+        "201":
+          description: Convite criado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /invitations/{invitationId}/resend:
+    parameters:
+      - $ref: "#/components/parameters/InvitationId"
+    post:
+      tags: [Users]
+      operationId: resendInvitation
+      x-status: planned
+      x-permission: users.manage
+      security:
+        - bearerAuth: []
+      summary: Reenvia o convite
+      description: Ainda não implementado. Renova a expiração e reenvia o e-mail.
+      responses:
+        "204":
+          description: Convite reenviado.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /invitations/{invitationId}:
+    parameters:
+      - $ref: "#/components/parameters/InvitationId"
+    delete:
+      tags: [Users]
+      operationId: cancelInvitation
+      x-status: planned
+      x-permission: users.manage
+      security:
+        - bearerAuth: []
+      summary: Cancela o convite
+      description: Ainda não implementado.
+      responses:
+        "204":
+          description: Convite cancelado.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /companies:
+    get:
+      tags: [Companies]
+      operationId: listCompanies
+      x-status: planned
+      x-permission: companies.manage
+      security:
+        - bearerAuth: []
+      summary: Lista as empresas clientes
+      description: Ainda não implementado. Só super admin. A empresa operadora da plataforma não aparece na lista.
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/CompanyStatus"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Página de empresas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanyPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Companies]
+      operationId: createCompany
+      x-status: planned
+      x-permission: companies.manage
+      security:
+        - bearerAuth: []
+      summary: Cadastra empresa cliente
+      description: Ainda não implementado. CNPJ duplicado responde 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyInput"
+      responses:
+        "201":
+          description: Empresa criada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /companies/summary:
+    get:
+      tags: [Companies]
+      operationId: getCompaniesSummary
+      x-status: planned
+      x-permission: companies.manage
+      security:
+        - bearerAuth: []
+      summary: Indicadores da tela Empresas
+      description: Ainda não implementado. Só super admin.
+      responses:
+        "200":
+          description: Indicadores.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompaniesSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /companies/{companyId}:
+    parameters:
+      - name: companyId
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      tags: [Companies]
+      operationId: updateCompany
+      x-status: planned
+      x-permission: companies.manage
+      security:
+        - bearerAuth: []
+      summary: Altera empresa (dados, plano, status)
+      description: Ainda não implementado.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompanyUpdate"
+      responses:
+        "200":
+          description: Empresa atualizada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /me/profile:
+    get:
+      tags: [Profile]
+      operationId: getMyProfile
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Perfil do usuário autenticado
+      description: Ainda não implementado. Qualquer papel.
+      responses:
+        "200":
+          description: Perfil.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [Profile]
+      operationId: updateMyProfile
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Altera dados pessoais
+      description: |
+        Ainda não implementado. Só o nome. E-mail, papel e empresa são geridos por um administrador
+        (campos ignorados se enviados).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdate"
+      responses:
+        "200":
+          description: Perfil atualizado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /me/password:
+    post:
+      tags: [Profile]
+      operationId: changeMyPassword
+      x-status: planned
+      security:
+        - bearerAuth: []
+      summary: Troca a senha
+      description: |
+        Ainda não implementado. Exige a senha atual. Regra da nova senha (configuração da API):
+        mínimo de 8 caracteres, com letras e números. Falhas respondem 422 com `details` por campo
+        (`current_password`, `new_password`).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChange"
+      responses:
+        "204":
+          description: Senha alterada.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      operationId: getDashboard
+      x-status: planned
+      x-permission: dashboard.view
+      security:
+        - bearerAuth: []
+      summary: Painel do administrador
+      description: |
+        Ainda não implementado. Indicadores, janelas aptas × aplicações, próximas janelas, alertas do agente
+        e atividade recente, no escopo do usuário. Os blocos de janelas e alertas vêm do spray-planner;
+        até ele existir, são servidos pelo mock do front. Todas as contas e textos chegam prontos.
+      parameters:
+        - name: farm_id
+          in: query
+          description: Restringe a uma fazenda; omitido = todas as fazendas do escopo. Fora do escopo responde 403 `out_of_scope`.
+          schema:
+            type: string
+        - name: period_days
+          in: query
+          description: Período do gráfico janelas × aplicações.
+          schema:
+            type: integer
+            minimum: 7
+            maximum: 31
+            default: 14
+      responses:
+        "200":
+          description: Painel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token devolvido por `POST /auth/login`. Exigido apenas pelos endpoints planejados de negócio; probes e docs são públicos.
+  parameters:
+    FarmId:
+      name: farmId
+      in: path
+      required: true
+      schema:
+        type: string
+    FieldId:
+      name: fieldId
+      in: path
+      required: true
+      schema:
+        type: string
+    InvitationId:
+      name: invitationId
+      in: path
+      required: true
+      schema:
+        type: string
+    OwnerId:
+      name: ownerId
+      in: path
+      required: true
+      schema:
+        type: string
+    Page:
+      name: page
+      in: query
+      description: Página, começando em 1.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
   headers:
     XRequestId:
       description: Identificador da requisição, presente em todas as respostas, útil para correlacionar logs.
@@ -208,6 +1222,78 @@ components:
             error:
               code: internal_error
               message: erro interno
+    Forbidden:
+      description: |
+        Ação não permitida (ADR 0013). `forbidden`: o papel não tem a capacidade exigida;
+        `out_of_scope`: o recurso está fora das fazendas liberadas para o usuário.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            forbidden:
+              value:
+                error:
+                  code: forbidden
+                  message: você não tem permissão para esta ação
+            outOfScope:
+              value:
+                error:
+                  code: out_of_scope
+                  message: fazenda fora do seu escopo
+    Unauthorized:
+      description: Token ausente, inválido ou expirado (ou credenciais inválidas no login).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: unauthorized
+              message: credenciais inválidas
+    ValidationFailed:
+      description: Entrada inválida. `details` aponta o campo de cada falha.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: validation_failed
+              message: dados inválidos
+              details:
+                - field: document
+                  message: CPF inválido
+    Conflict:
+      description: Conflito com um recurso existente (por exemplo, CPF/CNPJ já cadastrado).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: conflict
+              message: CPF já cadastrado
+    PayloadTooLarge:
+      description: Arquivo acima do limite.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: payload_too_large
+              message: arquivo acima de 10 MB
+    UnsupportedMediaType:
+      description: Formato de arquivo não suportado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: unsupported_media_type
+              message: formato não suportado; use KML, KMZ, GeoJSON ou Shapefile (.zip)
   schemas:
     HealthStatus:
       type: string
@@ -245,7 +1331,1111 @@ components:
             code:
               type: string
               description: Código estável da falha.
-              enum: [not_found, method_not_allowed, internal_error]
+              enum:
+                - not_found
+                - method_not_allowed
+                - internal_error
+                - unauthorized
+                - validation_failed
+                - conflict
+                - payload_too_large
+                - unsupported_media_type
+                - forbidden
+                - out_of_scope
             message:
               type: string
               description: Mensagem legível para humanos.
+            details:
+              type: array
+              description: Falhas por campo. Presente apenas em `validation_failed`.
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field:
+                    type: string
+                    description: Caminho do campo na entrada (ex. `links[0].share_percent`).
+                  message:
+                    type: string
+    # --- Schemas dos endpoints planejados (ADR 0010) ---------------------------
+    GeoPoint:
+      type: object
+      required: [lat, lng]
+      properties:
+        lat:
+          type: number
+          minimum: -90
+          maximum: 90
+        lng:
+          type: number
+          minimum: -180
+          maximum: 180
+    GeoJsonPolygon:
+      type: object
+      description: Geometria GeoJSON (RFC 7946), coordenadas `[lng, lat]` em WGS84.
+      required: [type, coordinates]
+      properties:
+        type:
+          type: string
+          const: Polygon
+        coordinates:
+          type: array
+          items:
+            type: array
+            items:
+              type: array
+              minItems: 2
+              maxItems: 2
+              items:
+                type: number
+    GeoJsonMultiPolygon:
+      type: object
+      required: [type, coordinates]
+      properties:
+        type:
+          type: string
+          const: MultiPolygon
+        coordinates:
+          type: array
+          items:
+            type: array
+            items:
+              type: array
+              items:
+                type: array
+                minItems: 2
+                maxItems: 2
+                items:
+                  type: number
+    PerimeterGeometry:
+      oneOf:
+        - $ref: "#/components/schemas/GeoJsonPolygon"
+        - $ref: "#/components/schemas/GeoJsonMultiPolygon"
+    LoginRequest:
+      type: object
+      required: [identifier, password, remember_me]
+      properties:
+        identifier:
+          type: string
+          minLength: 1
+          description: E-mail ou CPF do usuário.
+          examples: [bruno@fazendasantarita.com.br, 123.278.916-05]
+        password:
+          type: string
+          format: password
+          minLength: 1
+        remember_me:
+          type: boolean
+          description: Sessão longa ("Manter conectado"); a duração exata é configuração da API.
+    LoginResponse:
+      type: object
+      required: [access_token, token_type, expires_at, user]
+      properties:
+        access_token:
+          type: string
+        token_type:
+          type: string
+          const: Bearer
+        expires_at:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/User"
+    UserRole:
+      type: string
+      enum: [super_admin, admin, planning_operator]
+      description: Papéis da ADR 0013. As capacidades de cada um estão em `Permission`.
+    User:
+      type: object
+      description: Sessão (`GET /auth/me` e login). O front decide o que mostrar por `permissions`.
+      required: [id, name, email, role, primary_farm, company, farm_scope, permissions]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/UserRole"
+        primary_farm:
+          description: Fazenda principal do usuário, exibida no rodapé do menu.
+          oneOf:
+            - $ref: "#/components/schemas/FarmRef"
+            - type: "null"
+        company:
+          $ref: "#/components/schemas/CompanyRef"
+        farm_scope:
+          $ref: "#/components/schemas/FarmScope"
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Permission"
+    FarmRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    FarmStatus:
+      type: string
+      enum: [draft, active, pending]
+      description: "draft: rascunho do assistente; active: cadastro completo; pending: cadastro com pendências (ex.: documentos de proprietário)."
+    ProductionType:
+      type: string
+      enum: [coffee, grains, livestock, mixed]
+    SprayCondition:
+      type: string
+      enum: [suitable, attention, unsuitable, rain]
+      description: Condição de pulverização calculada pelo backend (spray-planner). O front apenas exibe.
+    SprayOutlook:
+      type: object
+      description: |
+        Resumo da condição de pulverização, calculado no backend a partir das regras de Delta T,
+        vento e chuva. Nulo enquanto a fazenda não tiver perímetro ou previsão.
+      required: [condition, headline]
+      properties:
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+        headline:
+          type: string
+          description: Frase curta pronta para exibir (ex. "2 janelas aptas hoje").
+    Crop:
+      type: object
+      required: [code, name]
+      properties:
+        code:
+          type: string
+          examples: [coffee_arabica]
+        name:
+          type: string
+          examples: [Café arábica]
+    FarmOwnerShare:
+      type: object
+      required: [owner_id, name, role, share_percent]
+      properties:
+        owner_id:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: "#/components/schemas/LinkRole"
+        share_percent:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+    FarmSummary:
+      type: object
+      required:
+        - id
+        - name
+        - code
+        - city
+        - state
+        - status
+        - production_type
+        - total_area_ha
+        - productive_area_ha
+        - field_count
+        - crops
+        - owners
+        - spray_outlook
+        - forecast_point
+        - perimeter
+        - created_at
+        - company_id
+      properties:
+        company_id:
+          type: string
+          description: Empresa dona da fazenda (tenant, ADR 0013).
+        id:
+          type: string
+        name:
+          type: string
+        code:
+          type: [string, "null"]
+          description: Apelido/código curto exibido nas etiquetas do mapa (ex. STR-01).
+        city:
+          type: string
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+          description: UF.
+        status:
+          $ref: "#/components/schemas/FarmStatus"
+        production_type:
+          $ref: "#/components/schemas/ProductionType"
+        total_area_ha:
+          type: number
+          description: Área do perímetro em hectares.
+        productive_area_ha:
+          type: number
+          description: Soma das áreas dos talhões, em hectares.
+        field_count:
+          type: integer
+        crops:
+          type: array
+          items:
+            $ref: "#/components/schemas/Crop"
+        owners:
+          type: array
+          items:
+            $ref: "#/components/schemas/FarmOwnerShare"
+        spray_outlook:
+          oneOf:
+            - $ref: "#/components/schemas/SprayOutlook"
+            - type: "null"
+        forecast_point:
+          description: Ponto de previsão, usado como marcador no modo mapa da lista.
+          oneOf:
+            - $ref: "#/components/schemas/GeoPoint"
+            - type: "null"
+        perimeter:
+          description: |
+            Perímetro **simplificado** (poucos vértices, WGS84) para a miniatura e o modo mapa
+            da lista. A geometria completa fica em `Farm.location.perimeter`.
+          oneOf:
+            - $ref: "#/components/schemas/PerimeterGeometry"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+          description: Data de cadastro; alimenta o indicador "+N este mês".
+    FarmLocation:
+      type: object
+      required: [postal_code, car_number, forecast_point, perimeter]
+      properties:
+        postal_code:
+          type: [string, "null"]
+          description: CEP, apenas dígitos.
+        car_number:
+          type: [string, "null"]
+          description: Número do CAR (Cadastro Ambiental Rural).
+        forecast_point:
+          description: Ponto usado para buscar a previsão do tempo (sede ou centróide do perímetro).
+          oneOf:
+            - $ref: "#/components/schemas/GeoPoint"
+            - type: "null"
+        perimeter:
+          oneOf:
+            - $ref: "#/components/schemas/PerimeterGeometry"
+            - type: "null"
+    Farm:
+      allOf:
+        - $ref: "#/components/schemas/FarmSummary"
+        - type: object
+          required: [cooperative, location, updated_at]
+          properties:
+            cooperative:
+              type: [string, "null"]
+            location:
+              $ref: "#/components/schemas/FarmLocation"
+            updated_at:
+              type: string
+              format: date-time
+    FarmInput:
+      type: object
+      required: [name, production_type, city, state, status, location, owners]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        code:
+          type: [string, "null"]
+        cooperative:
+          type: [string, "null"]
+        production_type:
+          $ref: "#/components/schemas/ProductionType"
+        city:
+          type: string
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+        status:
+          type: string
+          enum: [draft, active]
+          description: "`pending` é atribuído pela API, nunca enviado."
+        location:
+          type: object
+          required: [postal_code, car_number, forecast_point, perimeter]
+          properties:
+            postal_code:
+              type: [string, "null"]
+            car_number:
+              type: [string, "null"]
+            forecast_point:
+              oneOf:
+                - $ref: "#/components/schemas/GeoPoint"
+                - type: "null"
+            perimeter:
+              oneOf:
+                - $ref: "#/components/schemas/PerimeterGeometry"
+                - type: "null"
+        owners:
+          type: array
+          items:
+            $ref: "#/components/schemas/FarmOwnerShareInput"
+    FarmOwnerShareInput:
+      type: object
+      required: [owner_id, role, share_percent]
+      properties:
+        owner_id:
+          type: string
+        role:
+          $ref: "#/components/schemas/LinkRole"
+        share_percent:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+    FarmSummaryPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FarmSummary"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+    PerimeterSourceFormat:
+      type: string
+      enum: [kml, kmz, geojson, shapefile]
+    PerimeterImport:
+      type: object
+      required: [source_format, perimeter, area_ha, centroid]
+      properties:
+        source_format:
+          $ref: "#/components/schemas/PerimeterSourceFormat"
+        perimeter:
+          $ref: "#/components/schemas/PerimeterGeometry"
+        area_ha:
+          type: number
+          description: Área calculada pela API, em hectares.
+        centroid:
+          $ref: "#/components/schemas/GeoPoint"
+        municipality:
+          type: [string, "null"]
+          description: Município onde está o centróide, quando a API consegue identificar.
+        state:
+          type: [string, "null"]
+          minLength: 2
+          maxLength: 2
+          description: UF do município identificado.
+        datum:
+          type: [string, "null"]
+          description: Sistema de referência do arquivo de origem (ex. "SIRGAS 2000"); a resposta é sempre WGS84.
+        field_count:
+          type: [integer, "null"]
+          minimum: 0
+          description: Polígonos internos encontrados no arquivo (possíveis talhões), além do perímetro.
+    Field:
+      type: object
+      required:
+        - id
+        - farm_id
+        - name
+        - block
+        - area_ha
+        - crop
+        - variety
+        - season
+        - planting_date
+        - row_spacing_m
+        - plant_spacing_m
+        - plants_per_ha
+        - polygon
+        - spray_condition
+        - last_application_at
+      properties:
+        id:
+          type: string
+        farm_id:
+          type: string
+        name:
+          type: string
+        block:
+          type: [string, "null"]
+          description: Área (bloco) que agrupa talhões, ex. "Área Norte".
+        area_ha:
+          type: number
+          description: Calculada pela API a partir do polígono.
+        crop:
+          $ref: "#/components/schemas/Crop"
+        variety:
+          type: [string, "null"]
+          examples: [Catuaí 144]
+        season:
+          type: [string, "null"]
+          description: Safra, ex. "2026/27".
+        planting_date:
+          type: [string, "null"]
+          format: date
+        row_spacing_m:
+          type: [number, "null"]
+          description: Espaçamento entre linhas, em metros.
+        plant_spacing_m:
+          type: [number, "null"]
+          description: Espaçamento entre plantas, em metros.
+        plants_per_ha:
+          type: [integer, "null"]
+          description: Estande calculado pela API a partir do espaçamento.
+        polygon:
+          $ref: "#/components/schemas/GeoJsonPolygon"
+        spray_condition:
+          description: Condição atual de pulverização, calculada no backend. Nula sem previsão.
+          oneOf:
+            - $ref: "#/components/schemas/SprayCondition"
+            - type: "null"
+        last_application_at:
+          type: [string, "null"]
+          format: date-time
+    FieldInput:
+      type: object
+      required: [name, crop_code, polygon]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        block:
+          type: [string, "null"]
+        crop_code:
+          type: string
+        variety:
+          type: [string, "null"]
+        season:
+          type: [string, "null"]
+        planting_date:
+          type: [string, "null"]
+          format: date
+        row_spacing_m:
+          type: [number, "null"]
+          exclusiveMinimum: 0
+        plant_spacing_m:
+          type: [number, "null"]
+          exclusiveMinimum: 0
+        polygon:
+          $ref: "#/components/schemas/GeoJsonPolygon"
+    PersonType:
+      type: string
+      enum: [individual, company]
+      description: "individual: pessoa física (CPF); company: pessoa jurídica (CNPJ)."
+    LinkRole:
+      type: string
+      enum: [owner, tenant, legal_representative]
+      description: "owner: proprietário com participação; tenant: arrendatário; legal_representative: responsável legal sem participação."
+    OwnerDocumentKind:
+      type: string
+      enum: [id_card, driver_license, articles_of_incorporation, other]
+    OwnerDocument:
+      type: object
+      required: [id, kind, file_name, uploaded_at]
+      properties:
+        id:
+          type: string
+        kind:
+          $ref: "#/components/schemas/OwnerDocumentKind"
+        file_name:
+          type: string
+        uploaded_at:
+          type: string
+          format: date-time
+    OwnerFarmLink:
+      type: object
+      required: [farm_id, farm_name, role, share_percent]
+      properties:
+        farm_id:
+          type: string
+        farm_name:
+          type: string
+        role:
+          $ref: "#/components/schemas/LinkRole"
+        share_percent:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+          description: Participação na fazenda. Nula para arrendatário e responsável legal.
+    OwnerFarmLinkInput:
+      type: object
+      required: [farm_id, role, share_percent]
+      properties:
+        farm_id:
+          type: string
+        role:
+          $ref: "#/components/schemas/LinkRole"
+        share_percent:
+          type: [number, "null"]
+          minimum: 0
+          maximum: 100
+    OwnerFarmLinkList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnerFarmLink"
+    OwnerSummary:
+      type: object
+      required: [id, person_type, name, document, has_pending_documents, links]
+      properties:
+        id:
+          type: string
+        person_type:
+          $ref: "#/components/schemas/PersonType"
+        name:
+          type: string
+          description: Nome completo (PF) ou razão social (PJ).
+        document:
+          type: string
+          description: CPF (11 dígitos) ou CNPJ (14 dígitos), apenas dígitos. O front mascara na exibição.
+        has_pending_documents:
+          type: boolean
+        links:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnerFarmLink"
+    Owner:
+      allOf:
+        - $ref: "#/components/schemas/OwnerSummary"
+        - type: object
+          required: [birth_date, phone, email, window_alerts_enabled, documents, created_at, updated_at]
+          properties:
+            birth_date:
+              type: [string, "null"]
+              format: date
+              description: Apenas pessoa física.
+            phone:
+              type: [string, "null"]
+              description: WhatsApp, apenas dígitos com DDD.
+            email:
+              type: [string, "null"]
+              format: email
+            window_alerts_enabled:
+              type: boolean
+              description: Recebe alertas de janela de pulverização no WhatsApp.
+            documents:
+              type: array
+              items:
+                $ref: "#/components/schemas/OwnerDocument"
+            created_at:
+              type: string
+              format: date-time
+            updated_at:
+              type: string
+              format: date-time
+    OwnerInput:
+      type: object
+      required: [person_type, name, document, birth_date, phone, email, window_alerts_enabled]
+      properties:
+        person_type:
+          $ref: "#/components/schemas/PersonType"
+        name:
+          type: string
+          minLength: 1
+        document:
+          type: string
+          description: CPF ou CNPJ, com ou sem máscara; a API normaliza e valida.
+        birth_date:
+          type: [string, "null"]
+          format: date
+        phone:
+          type: [string, "null"]
+        email:
+          type: [string, "null"]
+          format: email
+        window_alerts_enabled:
+          type: boolean
+    OwnerSummaryPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnerSummary"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+    # --- Página 03: empresas, papéis e permissões (ADR 0013) --------------------
+    Permission:
+      type: string
+      enum:
+        - dashboard.view
+        - companies.manage
+        - users.manage
+        - users.manage_all
+        - registry.write
+        - applications.register
+        - applications.confirm
+        - planner.use
+      description: |
+        Capacidade devolvida em `User.permissions`. O front verifica capacidades, nunca nomes de papel.
+        Ler cadastros (fazendas, talhões, proprietários) no próprio escopo não exige capacidade.
+
+        | Capacidade | super_admin | admin | planning_operator |
+        |---|---|---|---|
+        | `dashboard.view` (Painel) | sim | sim | não |
+        | `companies.manage` (Empresas) | sim | não | não |
+        | `users.manage` (Usuários e convites da empresa) | sim | sim | não |
+        | `users.manage_all` (usuários de todas as empresas, papel super admin) | sim | não | não |
+        | `registry.write` (criar/editar fazendas, talhões, proprietários) | sim | sim | não |
+        | `applications.register` (registrar aplicação) | sim | sim | sim |
+        | `applications.confirm` (confirmar aplicação) | sim | sim | não |
+        | `planner.use` (Planejador e agente) | sim | sim | sim |
+
+        O operador de planejamento só enxerga as fazendas do seu `farm_scope`.
+    CompanyRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    FarmScope:
+      description: Fazendas que o usuário enxerga. `all` = todas da empresa; `selected` = só `farm_ids`.
+      oneOf:
+        - type: object
+          required: [mode]
+          properties:
+            mode:
+              type: string
+              const: all
+        - type: object
+          required: [mode, farm_ids]
+          properties:
+            mode:
+              type: string
+              const: selected
+            farm_ids:
+              type: array
+              minItems: 1
+              items:
+                type: string
+    UserStatus:
+      type: string
+      enum: [active, invited, inactive]
+      description: "invited: convite pendente (a pessoa ainda não criou a senha)."
+    InvitationRef:
+      type: object
+      required: [id, expires_at]
+      properties:
+        id:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+    UserAccount:
+      type: object
+      description: Linha da tela Usuários (usuário ou convite pendente).
+      required: [id, name, email, role, company, farm_scope, status, last_access_at, invitation]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/UserRole"
+        company:
+          $ref: "#/components/schemas/CompanyRef"
+        farm_scope:
+          $ref: "#/components/schemas/FarmScope"
+        status:
+          $ref: "#/components/schemas/UserStatus"
+        last_access_at:
+          type: [string, "null"]
+          format: date-time
+        invitation:
+          description: Presente só quando o status é `invited`.
+          oneOf:
+            - $ref: "#/components/schemas/InvitationRef"
+            - type: "null"
+    UserAccountPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserAccount"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+    UsersSummary:
+      type: object
+      required: [total_users, company_count, pending_invitations, by_role]
+      properties:
+        total_users:
+          type: integer
+          description: Usuários e convites pendentes no escopo.
+        company_count:
+          type: integer
+        pending_invitations:
+          type: integer
+        by_role:
+          type: object
+          required: [super_admin, admin, planning_operator]
+          properties:
+            super_admin:
+              type: integer
+            admin:
+              type: integer
+            planning_operator:
+              type: integer
+    UserUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        role:
+          $ref: "#/components/schemas/UserRole"
+        company_id:
+          type: string
+          description: Só super admin.
+        farm_scope:
+          $ref: "#/components/schemas/FarmScope"
+        status:
+          type: string
+          enum: [active, inactive]
+    InvitationInput:
+      type: object
+      required: [name, email, role, company_id, farm_scope]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/UserRole"
+        company_id:
+          type: string
+          description: Administrador só convida para a própria empresa.
+        farm_scope:
+          $ref: "#/components/schemas/FarmScope"
+    CompanyPlan:
+      type: string
+      enum: [basic, pro, trial]
+      description: "trial: em avaliação."
+    CompanyStatus:
+      type: string
+      enum: [active, trial, inactive]
+    Company:
+      type: object
+      required: [id, name, document, city, state, plan, status, trial_ends_at, farm_count, user_count, created_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        document:
+          type: string
+          description: CNPJ, apenas dígitos.
+        city:
+          type: string
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+        plan:
+          $ref: "#/components/schemas/CompanyPlan"
+        status:
+          $ref: "#/components/schemas/CompanyStatus"
+        trial_ends_at:
+          type: [string, "null"]
+          format: date-time
+          description: Fim da avaliação; o front mostra "Em avaliação · N dias".
+        farm_count:
+          type: integer
+        user_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    CompanyPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Company"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+    CompaniesSummary:
+      type: object
+      required:
+        - active_companies
+        - trial_companies
+        - farm_count
+        - monitored_area_ha
+        - user_count
+        - pending_invitations
+        - applications_this_month
+        - applications_previous_month
+      properties:
+        active_companies:
+          type: integer
+          description: Empresas ativas, incluindo as em avaliação.
+        trial_companies:
+          type: integer
+        farm_count:
+          type: integer
+        monitored_area_ha:
+          type: number
+        user_count:
+          type: integer
+        pending_invitations:
+          type: integer
+        applications_this_month:
+          type: integer
+        applications_previous_month:
+          type: integer
+    CompanyInput:
+      type: object
+      required: [name, document, city, state, plan]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        document:
+          type: string
+          description: CNPJ, com ou sem máscara.
+        city:
+          type: string
+        state:
+          type: string
+          minLength: 2
+          maxLength: 2
+        plan:
+          $ref: "#/components/schemas/CompanyPlan"
+    CompanyUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+        city:
+          type: string
+        state:
+          type: string
+        plan:
+          $ref: "#/components/schemas/CompanyPlan"
+        status:
+          $ref: "#/components/schemas/CompanyStatus"
+    Profile:
+      type: object
+      required: [id, name, email, role, company, farm_scope, password_changed_at]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          $ref: "#/components/schemas/UserRole"
+        company:
+          $ref: "#/components/schemas/CompanyRef"
+        farm_scope:
+          $ref: "#/components/schemas/FarmScope"
+        password_changed_at:
+          type: [string, "null"]
+          format: date-time
+    ProfileUpdate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+    PasswordChange:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+    DashboardIndicators:
+      type: object
+      required: [suitable_windows_today, applications_this_month, sprayed_area, pending_items]
+      properties:
+        suitable_windows_today:
+          type: object
+          required: [count, field_labels, next_start_at]
+          properties:
+            count:
+              type: integer
+            field_labels:
+              type: array
+              items:
+                type: string
+              examples: [[T3, T5, T7]]
+            next_start_at:
+              type: [string, "null"]
+              format: date-time
+        applications_this_month:
+          type: object
+          required: [count, confirmed_this_week]
+          properties:
+            count:
+              type: integer
+            confirmed_this_week:
+              type: integer
+        sprayed_area:
+          type: object
+          required: [area_ha, productive_area_ha]
+          properties:
+            area_ha:
+              type: number
+            productive_area_ha:
+              type: number
+        pending_items:
+          type: object
+          required: [count, headline]
+          properties:
+            count:
+              type: integer
+            headline:
+              type: [string, "null"]
+              description: Frase pronta, ex. "1 carência vence amanhã".
+    DashboardDay:
+      type: object
+      required: [date, suitable_hours, applications]
+      properties:
+        date:
+          type: string
+          format: date
+        suitable_hours:
+          type: number
+        applications:
+          type: integer
+    UpcomingWindow:
+      type: object
+      required: [field_id, field_label, farm_id, date, start_time, end_time, crop_variety, operation, condition]
+      properties:
+        field_id:
+          type: string
+        field_label:
+          type: string
+          description: Rótulo curto do talhão (ex. "T3").
+        farm_id:
+          type: string
+        date:
+          type: string
+          format: date
+        start_time:
+          type: [string, "null"]
+          description: Hora local da fazenda (HH:mm); nula quando não há janela no dia.
+        end_time:
+          type: [string, "null"]
+        crop_variety:
+          type: [string, "null"]
+          examples: [Catuaí 144]
+        operation:
+          type: [string, "null"]
+          examples: [fungicida]
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+    AgentAlert:
+      type: object
+      required: [id, kind, tone, title, description]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [pre_harvest_interval, rain, forecast_update, other]
+        tone:
+          type: string
+          enum: [attention, highlight, info]
+        title:
+          type: string
+        description:
+          type: string
+    ActivityEntry:
+      type: object
+      required: [id, actor, description, occurred_at]
+      properties:
+        id:
+          type: string
+        actor:
+          type: object
+          required: [kind, name]
+          properties:
+            kind:
+              type: string
+              enum: [user, agent]
+            name:
+              type: string
+        description:
+          type: string
+          description: Texto pronto após o nome do ator (ex. "registrou aplicação no T3 · 38,6 ha").
+        occurred_at:
+          type: string
+          format: date-time
+    Dashboard:
+      type: object
+      required: [generated_at, farm_id, farm_count, indicators, windows_vs_applications, upcoming_windows, agent_alerts, recent_activity]
+      properties:
+        generated_at:
+          type: string
+          format: date-time
+        farm_id:
+          type: [string, "null"]
+          description: Fazenda filtrada, ou nula para todas do escopo.
+        farm_count:
+          type: integer
+          description: Fazendas consideradas (o seletor mostra "Todas (N)").
+        indicators:
+          $ref: "#/components/schemas/DashboardIndicators"
+        windows_vs_applications:
+          type: object
+          required: [days, summary]
+          properties:
+            days:
+              type: array
+              items:
+                $ref: "#/components/schemas/DashboardDay"
+            summary:
+              type: [string, "null"]
+              description: Leitura do agente sobre o período, pronta para exibir.
+        upcoming_windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/UpcomingWindow"
+        agent_alerts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentAlert"
+        recent_activity:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityEntry"

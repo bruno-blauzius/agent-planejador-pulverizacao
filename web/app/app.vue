@@ -3,5 +3,9 @@ useHead({ title: 'Agentes Agro' })
 </script>
 
 <template>
-  <NuxtPage />
+  <v-app>
+    <NuxtLayout>
+      <NuxtPage />
+    </NuxtLayout>
+  </v-app>
 </template>
