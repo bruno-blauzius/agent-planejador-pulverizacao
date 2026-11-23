@@ -16,8 +16,10 @@ export interface NuxtFakes {
   cookie: (name: string) => Ref<string | null>
   /** Expiry the cookie would be written with (Nuxt resolves `expires` on each write). */
   cookieExpires: (name: string) => Date | undefined
+  /** `useRuntimeConfig().public`; tests set what the code under test reads. */
+  publicConfig: Record<string, unknown>
   /** Route returned by `useRoute()`; tests mutate its query. */
-  route: { path: string, fullPath: string, query: Record<string, unknown> }
+  route: { path: string, fullPath: string, query: Record<string, unknown>, meta: { public?: boolean } }
   /** Targets passed to `navigateTo`, in order. */
   navigations: unknown[]
   /** Times `clearNuxtData()` was called (session changes drop cached page data). */
@@ -57,7 +59,8 @@ export function installNuxtFakes(api: ApiServices | ((fakes: NuxtFakes) => ApiSe
       const expires = cookieOptions.get(name)?.expires
       return typeof expires === 'function' ? expires() : expires
     },
-    route: reactive({ path: '/login', fullPath: '/login', query: {} }),
+    publicConfig: {},
+    route: reactive({ path: '/login', fullPath: '/login', query: {}, meta: {} }),
     navigations: [],
     routeMiddleware: null,
     autoMount: true,
@@ -84,6 +87,7 @@ export function installNuxtFakes(api: ApiServices | ((fakes: NuxtFakes) => ApiSe
     else mountedCallbacks.push(callback)
   })
   vi.stubGlobal('useRoute', () => fakes.route)
+  vi.stubGlobal('useRuntimeConfig', () => ({ public: fakes.publicConfig }))
   // The fake useAsyncData keeps no shared cache, so there is nothing to clear; tests can count calls.
   vi.stubGlobal('clearNuxtData', () => {
     fakes.clearedNuxtData += 1

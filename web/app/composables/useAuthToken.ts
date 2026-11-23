@@ -3,14 +3,14 @@ import { readonly } from 'vue'
 export const AUTH_TOKEN_COOKIE = 'agro_access_token'
 
 /**
- * Bearer token of services/api, kept in a cookie (not localStorage) so SSR
- * requests carry it too. The cookie expires together with the token
- * (`expires_at` from the login); `expires` is a function because Nuxt resolves
- * it on every write, after `setToken` has stored the new expiry.
+ * DEV MOCK ONLY (ADR 0010). Fake Bearer token of the in-memory mock, kept in a
+ * cookie so SSR requests carry it too; it expires with the mock login's
+ * `expiresAt` (`expires` is a function because Nuxt resolves it on every write).
  *
- * Temporary: the cookie is NOT httpOnly because the client writes it. When the
- * API exists, the recommended path is an httpOnly cookie set by services/api
- * (ADR 0010, adendo).
+ * The real session (ADR 0015) is the HttpOnly `agro_session` cookie of
+ * services/api: JavaScript never reads it and this composable is never called on
+ * that path (`useSession` only creates it for the `password` flavour). Remove it
+ * together with `services/mock/` when every endpoint exists.
  */
 export function useAuthToken() {
   const expiresAt = useState<string | null>('session:tokenExpiresAt', () => null)

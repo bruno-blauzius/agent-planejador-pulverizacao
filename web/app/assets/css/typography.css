@@ -73,6 +73,15 @@
   --font-label-chip: 600 12px/15px var(--font-body);
   /* Draft status of the wizard steps (Figma 35:486). */
   --font-label-caption: 500 12px/16px var(--font-body);
+  /* Spray planner (Figma 18:2, 20:18). */
+  --font-planner-plan-title: 700 26px/31px var(--font-display);
+  --tracking-planner-plan-title: -0.006em;
+  --font-planner-now: 800 42px/40px var(--font-display);
+  --tracking-planner-now: -0.02em;
+  --font-planner-axis: 400 10px/13px var(--font-body);
+  --font-planner-hour: 400 9px/11px var(--font-body);
+  --font-planner-hour-strong: 700 9px/11px var(--font-body);
+  --font-label-lg: 700 16px/20px var(--font-body);
 }
 
 .text-display {
@@ -178,6 +187,10 @@
 
 .text-label-button-sm {
   font: var(--font-label-button-sm);
+}
+
+.text-label-lg {
+  font: var(--font-label-lg);
 }
 
 .text-label-badge {

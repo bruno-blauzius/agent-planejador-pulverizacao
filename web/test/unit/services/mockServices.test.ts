@@ -41,10 +41,11 @@ describe('mock auth', () => {
     expect(session.accessToken).toBe('mock-token:user-bruno')
   })
 
-  it('accepts the CPF (masked) and extends the session with remember me', async () => {
+  it('extends the session with remember me and no longer accepts the CPF (ADR 0015)', async () => {
     const { api } = createTestApi(null)
     const short = await api.auth.login({ identifier: SEED_USER_EMAIL, password: SEED_USER_PASSWORD, rememberMe: false })
-    const long = await api.auth.login({ identifier: '123.278.916-05', password: SEED_USER_PASSWORD, rememberMe: true })
+    const long = await api.auth.login({ identifier: SEED_USER_EMAIL.toUpperCase(), password: SEED_USER_PASSWORD, rememberMe: true })
+    expect((await rejection(api.auth.login({ identifier: '123.278.916-05', password: SEED_USER_PASSWORD, rememberMe: false }))).code).toBe('unauthorized')
     expect(long.user.id).toBe('user-bruno')
     expect(long.expiresAt.getTime()).toBeGreaterThan(short.expiresAt.getTime())
   })

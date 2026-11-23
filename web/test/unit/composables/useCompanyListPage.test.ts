@@ -58,9 +58,28 @@ describe('useCompanyListPage', () => {
     expect(page.isEmptySearch.value).toBe(true)
     expect(page.isEmpty.value).toBe(false)
 
+    const before = fakes.navigations.length
     page.clearSearch()
     await flushPromises()
     expect(page.rows.value).toHaveLength(4)
+    expect(fakes.route.query).toEqual({})
+    // A single query replace, not one from the watcher plus one from clearSearch.
+    expect(fakes.navigations.length - before).toBe(1)
+  })
+
+  it('clears the search at once even with a debounce', async () => {
+    const { api } = createTestApi('mock-token:user-bruno')
+    const fakes = installNuxtFakes(api)
+    fakes.cookie(AUTH_TOKEN_COOKIE).value = 'mock-token:user-bruno'
+    fakes.route.path = '/companies'
+    fakes.route.query = { q: 'santa' }
+    await useSession().fetchCurrentUser()
+    const page = useCompanyListPage({ debounceMs: 300, now: NOW })
+    await flushPromises()
+
+    page.clearSearch()
+    await flushPromises()
+    expect(fakes.route.query).toEqual({})
   })
 
   it('changes the page size and the page through the query', async () => {

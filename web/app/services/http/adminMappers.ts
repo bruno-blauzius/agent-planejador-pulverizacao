@@ -17,13 +17,12 @@ import type {
   CompanyUpdateDto,
   DashboardDto,
   InvitationInputDto,
-  PasswordChangeDto,
   ProfileDto,
   UserAccountDto,
   UsersSummaryDto,
   UserUpdateDto,
 } from '~/types/dto'
-import type { PasswordChangeInput, Profile } from '~/types/profile'
+import type { Profile } from '~/types/profile'
 import { toFarmScope, toFarmScopeDto } from './mappers'
 
 const dateOrNull = (value: string | null) => (value ? new Date(value) : null)
@@ -56,6 +55,7 @@ export function toUsersSummary(dto: UsersSummaryDto): UsersSummary {
 /** PATCH body with only the keys that change. */
 export function toUserUpdateDto(input: UserUpdateInput): UserUpdateDto {
   const dto: Mutable<UserUpdateDto> = {}
+  if (input.name !== undefined) dto.name = input.name.trim()
   if (input.role !== undefined) dto.role = input.role
   if (input.companyId !== undefined) dto.company_id = input.companyId
   if (input.farmScope !== undefined) dto.farm_scope = toFarmScopeDto(input.farmScope)
@@ -127,10 +127,6 @@ export function toProfile(dto: ProfileDto): Profile {
     farmScope: toFarmScope(dto.farm_scope),
     passwordChangedAt: dateOrNull(dto.password_changed_at),
   }
-}
-
-export function toPasswordChangeDto(input: PasswordChangeInput): PasswordChangeDto {
-  return { current_password: input.currentPassword, new_password: input.newPassword }
 }
 
 export function toDashboard(dto: DashboardDto): Dashboard {

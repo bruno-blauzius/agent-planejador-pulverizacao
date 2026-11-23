@@ -6,9 +6,16 @@ import type { DashboardChartView } from '~/utils/dashboard'
  * CSS (no chart library). Each series has its own scale (ratios come ready
  * from the logic); every day has an accessible label with the real values.
  */
-defineProps<{
-  chart: DashboardChartView
-}>()
+withDefaults(
+  defineProps<{
+    chart: DashboardChartView
+    /** Data still loading (nothing to show yet). */
+    pending?: boolean
+    /** Loading failed: never claim the block is empty. */
+    failed?: boolean
+  }>(),
+  { pending: false, failed: false },
+)
 
 const titleId = useId()
 </script>
@@ -25,7 +32,16 @@ const titleId = useId()
       </ul>
     </header>
 
-    <p v-if="chart.isEmpty" class="windows-chart__empty text-body-md">
+    <div
+      v-if="chart.days.length === 0"
+      class="windows-chart__placeholder"
+      :aria-busy="pending || undefined"
+    >
+      <p class="windows-chart__placeholder-text text-body-md" role="status">
+        {{ pending ? 'Carregando o gráfico…' : failed ? 'Gráfico indisponível no momento.' : 'Sem dados no período.' }}
+      </p>
+    </div>
+    <p v-else-if="chart.isEmpty" class="windows-chart__empty text-body-md">
       Sem janelas aptas nem aplicações no período.
     </p>
     <ol v-else class="windows-chart__plot">
@@ -151,6 +167,35 @@ const titleId = useId()
   text-align: center;
 }
 
+.windows-chart__placeholder {
+  display: grid;
+  place-items: center;
+  height: calc(var(--chart-plot-height) + var(--chart-label-height) + var(--space-8));
+  border-radius: var(--radius-md);
+  background: var(--color-sand);
+}
+
+.windows-chart__placeholder[aria-busy='true'] {
+  animation: windows-chart-pulse var(--duration-skeleton) var(--easing-standard) infinite;
+}
+
+.windows-chart__placeholder-text {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+@keyframes windows-chart-pulse {
+  50% {
+    opacity: var(--opacity-skeleton-dim);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .windows-chart__placeholder[aria-busy='true'] {
+    animation: none;
+  }
+}
+
 .windows-chart__summary {
   display: flex;
   gap: var(--space-10);
@@ -167,8 +212,9 @@ const titleId = useId()
 }
 
 @media (max-width: 599px) {
+  /* Room for the first and last date labels, wider than their narrow columns. */
   .windows-chart__plot {
-    padding: 0;
+    padding: 0 var(--space-12);
   }
 
   .windows-chart__bars {

@@ -103,6 +103,20 @@ describe('useUserListPage (super admin)', () => {
     expect(fakes.navigations.at(-1)).toEqual({ query: { invite: '1' } })
   })
 
+  it('tells loading apart from not found for `?user=`', async () => {
+    const fakes = await signInAs(SEED_LOGINS.superAdmin)
+    fakes.route.query = { user: 'user-carlos' }
+    const page = useUserListPage({ now })
+    expect(page.modal.value).toMatchObject({ mode: 'edit', user: null, loading: true })
+    await flushPromises()
+    expect(page.modal.value).toMatchObject({ mode: 'edit', user: { id: 'user-carlos' }, loading: false })
+
+    fakes.route.query = { user: 'user-inexistente' }
+    expect(page.modal.value).toMatchObject({ mode: 'edit', user: null, loading: true })
+    await flushPromises()
+    expect(page.modal.value).toEqual({ mode: 'edit', user: null, loading: false, loadError: null })
+  })
+
   it('does not run a disabled action on the own row', async () => {
     await signInAs(SEED_LOGINS.superAdmin)
     const page = useUserListPage({ now })

@@ -44,6 +44,12 @@ describe('dashboard presentation', () => {
     expect(buildDashboardChart([{ date: '2026-11-21', suitableHours: 0, applications: 0 }], null).isEmpty).toBe(true)
   })
 
+  it('keeps the fixed period in the title and is not "empty" before any day loads', () => {
+    const chart = buildDashboardChart([], null)
+    expect(chart.title).toBe('Janelas aptas × aplicações · últimos 14 dias')
+    expect(chart.isEmpty).toBe(false)
+  })
+
   it('labels upcoming windows relative to today', () => {
     const base = { fieldId: 'f', fieldLabel: 'T2', farmId: 'x', cropVariety: 'Catuaí 144', operation: 'fungicida' }
     expect(toUpcomingWindowView({ ...base, date: '2026-11-21', startTime: '06:00', endTime: '09:30', condition: 'suitable' }, '2026-11-21'))

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { clampPage, pageSlots } from '~/utils/pagination'
+
 /**
  * Table footer pagination (library "Paginação" 56:221, "Item de paginação"
  * 56:220): summary on the left, items-per-page menu and numbered pages on the
@@ -21,26 +23,12 @@ const props = withDefaults(
 const page = defineModel<number>('page', { required: true })
 const perPage = defineModel<number>('perPage', { default: 10 })
 
-type PageSlot = { kind: 'page', value: number } | { kind: 'gap', key: string }
-
-/** First, last and the neighbours of the current page; gaps become "…". */
-const entries = computed<PageSlot[]>(() => {
-  const total = Math.max(props.pageCount, 1)
-  const wanted = new Set([1, total, page.value - 1, page.value, page.value + 1].filter((value) => value >= 1 && value <= total))
-  const sorted = [...wanted].sort((a, b) => a - b)
-  const result: PageSlot[] = []
-  sorted.forEach((value, index) => {
-    const previous = sorted[index - 1]
-    if (previous !== undefined && value - previous > 1) result.push({ kind: 'gap', key: `gap-${value}` })
-    result.push({ kind: 'page', value })
-  })
-  return result
-})
+const entries = computed(() => pageSlots(page.value, props.pageCount))
 
 const hasPages = computed(() => props.pageCount > 1)
 
 function goTo(value: number) {
-  page.value = Math.min(Math.max(value, 1), Math.max(props.pageCount, 1))
+  page.value = clampPage(value, props.pageCount)
 }
 </script>
 

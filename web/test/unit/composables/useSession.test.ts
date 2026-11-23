@@ -42,7 +42,7 @@ describe('useSession', () => {
     const user = await session.login({ identifier: SEED_USER_EMAIL, password: 'wrong', rememberMe: false })
 
     expect(user).toBeNull()
-    expect(session.error.value).toMatchObject({ code: 'unauthorized', message: 'e-mail/CPF ou senha inválidos' })
+    expect(session.error.value).toMatchObject({ code: 'unauthorized', message: 'e-mail ou senha inválidos' })
     expect(session.isAuthenticated.value).toBe(false)
     expect(session.pending.value).toBe(false)
   })
@@ -73,7 +73,7 @@ describe('useSession', () => {
     const session = useSession()
     await session.login({ identifier: SEED_USER_EMAIL, password: SEED_USER_PASSWORD, rememberMe: false })
     expect(fakes.clearedNuxtData).toBe(1)
-    session.logout()
+    await session.logout()
     expect(fakes.clearedNuxtData).toBe(2)
   })
 
@@ -82,7 +82,7 @@ describe('useSession', () => {
     const session = useSession()
     await session.login({ identifier: SEED_USER_EMAIL, password: SEED_USER_PASSWORD, rememberMe: false })
 
-    session.logout()
+    expect(await session.logout()).toBe(true)
 
     expect(fakes.cookie(AUTH_TOKEN_COOKIE).value).toBeNull()
     expect(fakes.cookieExpires(AUTH_TOKEN_COOKIE)).toBeUndefined()

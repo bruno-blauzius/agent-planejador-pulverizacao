@@ -149,6 +149,25 @@ describe('useUserAccessForm (edit access)', () => {
     expect((await accountOf('user-carlos'))).toMatchObject({ role: 'admin', farmScope: { mode: 'all' } })
   })
 
+  it('keeps the edits when the list refresh hands over a new object of the same account', async () => {
+    await signInAs(SEED_LOGINS.superAdmin)
+    const carlos = await accountOf('user-carlos')
+    const user = shallowRef<UserAccount | null>(carlos)
+    const form = useUserAccessForm({ user })
+    await flushPromises()
+    form.values.role = 'admin'
+    form.touch('role')
+
+    user.value = { ...carlos }
+    await flushPromises()
+    expect(form.values.role).toBe('admin')
+
+    user.value = await accountOf('user-bruno')
+    await flushPromises()
+    expect(form.values.role).toBe('super_admin')
+    expect(form.fieldErrors.value).toEqual({})
+  })
+
   it('locks the own role', async () => {
     await signInAs(SEED_LOGINS.superAdmin)
     const self = await accountOf('user-bruno')

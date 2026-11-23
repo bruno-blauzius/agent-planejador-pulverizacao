@@ -87,6 +87,12 @@ export function useDashboardPage(options: UseDashboardPageOptions = {}) {
     error: resource.error,
     isForbidden: computed(() => resource.error.value?.code === 'forbidden'),
     isOutOfScope: computed(() => ['out_of_scope', 'not_found'].includes(resource.error.value?.code ?? '')),
+    /** Data loaded successfully: only then may the blocks say they are empty. */
+    isLoaded: computed(() => dashboard.value !== null && !resource.error.value),
+    /** "Ver todas as fazendas" from the out-of-scope state: drops `?farm=`. */
+    showAllFarms() {
+      selectedFarmId.value = null
+    },
     refresh: resource.refresh,
 
     statCards: computed(() => buildDashboardStatCards(dashboard.value)),

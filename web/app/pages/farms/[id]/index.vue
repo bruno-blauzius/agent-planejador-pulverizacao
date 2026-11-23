@@ -36,6 +36,7 @@ const {
   pending,
   error,
   isNotFound,
+  isForbidden,
   isEmpty,
   refresh,
   canWrite,
@@ -117,6 +118,13 @@ const mapAlt = computed(() =>
         </template>
       </EmptyState>
     </section>
+
+    <ForbiddenState
+      v-else-if="isForbidden"
+      description="Esta fazenda não está liberada para o seu perfil. Se precisar dela, fale com o administrador da sua empresa."
+      back-to="/farms"
+      back-label="Voltar para fazendas"
+    />
 
     <template v-else>
       <PageHeader :title="isFirstLoad ? 'Carregando fazenda…' : header.title" :breadcrumbs="header.breadcrumbs">

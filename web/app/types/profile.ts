@@ -9,6 +9,7 @@ export interface Profile {
   readonly role: UserRole
   readonly company: CompanyRef
   readonly farmScope: FarmScope
+  /** Deprecated: the real API returns `null` (the password belongs to Keycloak); only the mock fills it. */
   readonly passwordChangedAt: Date | null
 }
 

@@ -72,7 +72,22 @@ describe('useDashboardPage', () => {
   it('reports a farm outside the scope (other company: 404, out of scope: 403)', async () => {
     const { page } = await setup('mock-token:user-marina', { farm: 'farm-ouro-verde' })
     expect(page.isOutOfScope.value).toBe(true)
+    expect(page.isLoaded.value).toBe(false)
     expect(page.statCards.value.every(card => card.value === '—')).toBe(true)
+    expect(page.chart.value.isEmpty).toBe(false)
+  })
+
+  it('offers "Ver todas as fazendas" from an invalid farm, clearing ?farm=', async () => {
+    const { page, fakes } = await setup('mock-token:user-marina', { farm: 'zzz' })
+    expect(page.isOutOfScope.value).toBe(true)
+
+    page.showAllFarms()
+    await flushPromises()
+
+    expect(fakes.route.query).toEqual({})
+    expect(page.selectedFarmId.value).toBeNull()
+    expect(page.isOutOfScope.value).toBe(false)
+    expect(page.isLoaded.value).toBe(true)
   })
 
   it('shows the forbidden state without dashboard.view', async () => {

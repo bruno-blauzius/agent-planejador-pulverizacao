@@ -22,10 +22,10 @@ function fakeTransport(answer: (call: RecordedCall) => unknown) {
   return { calls, rawFetch }
 }
 
-function servicesWith(answer: (call: RecordedCall) => unknown, token: string | null = 'token-123') {
+function servicesWith(answer: (call: RecordedCall) => unknown) {
   const transport = fakeTransport(answer)
-  const http = createHttpClient({ baseURL: 'http://api.test', getAccessToken: () => token }, transport.rawFetch)
-  return { api: createHttpServices(http), calls: transport.calls }
+  const http = createHttpClient({ baseURL: 'http://api.test', credentials: 'include' }, transport.rawFetch)
+  return { api: createHttpServices(http, 'http://localhost:8002'), calls: transport.calls }
 }
 
 const farmDto: FarmDto = {
@@ -52,7 +52,7 @@ const farmDto: FarmDto = {
 }
 
 describe('http client', () => {
-  it('sends the bearer token and drops empty query params', async () => {
+  it('sends the session cookie, never a bearer token, and drops empty query params', async () => {
     const { api, calls } = servicesWith(() => ({ items: [], total: 0, page: 1, page_size: 20 }))
     await api.farms.list({ search: '', status: 'pending', productionType: 'coffee', page: 2 })
     expect(calls[0]).toEqual({
@@ -62,15 +62,46 @@ describe('http client', () => {
         method: 'GET',
         query: { status: 'pending', production_type: 'coffee', page: 2 },
         body: undefined,
-        headers: { Accept: 'application/json', Authorization: 'Bearer token-123' },
+        headers: { Accept: 'application/json' },
+        credentials: 'include',
+        onHeaders: expect.any(Function),
       },
     })
   })
 
-  it('omits Authorization without a token', async () => {
-    const { api, calls } = servicesWith(() => ({ items: [] }), null)
-    await api.crops.list()
-    expect(calls[0]?.options.headers).toEqual({ Accept: 'application/json' })
+  it('forwards extra request headers (the SSR cookie) on every call', async () => {
+    const transport = fakeTransport(() => ({ items: [] }))
+    const http = createHttpClient(
+      { baseURL: 'http://api.test', getRequestHeaders: () => ({ cookie: 'agro_session=abc' }) },
+      transport.rawFetch,
+    )
+    await createHttpServices(http, 'http://localhost:8002').crops.list()
+    expect(transport.calls[0]?.options.headers).toEqual({ Accept: 'application/json', cookie: 'agro_session=abc' })
+    expect(transport.calls[0]?.options.credentials).toBeUndefined()
+  })
+
+  it('tells the owner of the session when the API answers 401, and still rejects', async () => {
+    const unauthorized = Object.assign(new Error('[GET] 401'), {
+      name: 'FetchError',
+      statusCode: 401,
+      data: { error: { code: 'unauthorized', message: 'autenticação necessária' } },
+    })
+    const expired: string[] = []
+    const transport = fakeTransport(() => unauthorized)
+    const http = createHttpClient({ baseURL: 'http://api.test', onUnauthorized: path => expired.push(path) }, transport.rawFetch)
+    const error = await createHttpServices(http, 'http://localhost:8002').crops.list().catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'unauthorized', status: 401 })
+    expect(expired).toEqual(['/crops'])
+  })
+
+  it('exposes the response headers of calls made with withHeaders', async () => {
+    const http = createHttpClient({ baseURL: 'http://api.test' }, async (_path, options) => {
+      options.onHeaders?.({ get: name => (name === 'X-Invitation-Email' ? 'not_sent' : null) })
+      return { ok: true }
+    })
+    const result = await http.withHeaders<{ ok: boolean }>('/x')
+    expect(result.data).toEqual({ ok: true })
+    expect(result.headers.get('X-Invitation-Email')).toBe('not_sent')
   })
 
   it('turns an API error body into ApiError with field details', async () => {
@@ -92,39 +123,54 @@ describe('http client', () => {
   })
 })
 
-describe('http auth service', () => {
-  it('sends identifier and remember_me and maps the session', async () => {
-    const { api, calls } = servicesWith(() => ({
-      access_token: 'abc',
-      token_type: 'Bearer',
-      expires_at: '2026-12-21T12:00:00Z',
-      user: {
-        id: 'u-1',
-        name: 'Bruno',
-        email: 'b@x.test',
-        role: 'planning_operator',
-        primary_farm: null,
-        company: { id: 'c-1', name: 'Fazenda Santa Rita' },
-        farm_scope: { mode: 'selected', farm_ids: ['f-1'] },
-        permissions: ['applications.register', 'planner.use'],
-      },
-    }), null)
-    const session = await api.auth.login({ identifier: ' 123.278.916-05 ', password: 'secret', rememberMe: true })
-    expect(calls[0]).toMatchObject({
-      path: '/auth/login',
-      options: { method: 'POST', body: { identifier: '123.278.916-05', password: 'secret', remember_me: true } },
+describe('http auth service (SSO, ADR 0015)', () => {
+  const userDto = {
+    id: 'u-1',
+    name: 'Bruno',
+    email: 'b@x.test',
+    role: 'planning_operator',
+    primary_farm: null,
+    company: { id: 'c-1', name: 'Fazenda Santa Rita' },
+    farm_scope: { mode: 'selected', farm_ids: ['f-1'] },
+    permissions: ['applications.register', 'planner.use'],
+  }
+
+  it('builds the public login URL with an encoded return_to and no password flow', () => {
+    const { api } = servicesWith(() => null)
+    expect(api.auth.kind).toBe('sso')
+    if (api.auth.kind !== 'sso') throw new Error('expected the SSO flavour')
+    expect(api.auth.loginUrl('/farms?status=pending')).toBe('http://localhost:8002/auth/login?return_to=%2Ffarms%3Fstatus%3Dpending')
+  })
+
+  it('maps GET /auth/me into the session user', async () => {
+    const { api, calls } = servicesWith(() => userDto)
+    const user = await api.auth.getCurrentUser()
+    expect(calls[0]).toMatchObject({ path: '/auth/me', options: { method: 'GET', credentials: 'include' } })
+    expect(user).toMatchObject({
+      primaryFarm: null,
+      role: 'planning_operator',
+      company: { id: 'c-1', name: 'Fazenda Santa Rita' },
+      farmScope: { mode: 'selected', farmIds: ['f-1'] },
+      permissions: ['applications.register', 'planner.use'],
     })
-    expect(session).toMatchObject({
-      accessToken: 'abc',
-      expiresAt: new Date('2026-12-21T12:00:00Z'),
-      user: {
-        primaryFarm: null,
-        role: 'planning_operator',
-        company: { id: 'c-1', name: 'Fazenda Santa Rita' },
-        farmScope: { mode: 'selected', farmIds: ['f-1'] },
-        permissions: ['applications.register', 'planner.use'],
-      },
+  })
+
+  it('logs out with POST /auth/logout and the cookie', async () => {
+    const { api, calls } = servicesWith(() => undefined)
+    await api.auth.logout()
+    expect(calls[0]).toMatchObject({ path: '/auth/logout', options: { method: 'POST', credentials: 'include' } })
+  })
+
+  it('keeps the curated message of a product-access 403', async () => {
+    const denied = Object.assign(new Error('[GET] 403'), {
+      name: 'FetchError',
+      statusCode: 403,
+      data: { error: { code: 'user_not_provisioned', message: 'sua conta ainda não foi convidada para o Agentes Agro' } },
     })
+    const { api } = servicesWith(() => denied)
+    const error = await api.auth.getCurrentUser().catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ code: 'user_not_provisioned', status: 403 })
+    expect((error as Error).message).toContain('Peça um convite')
   })
 })
 

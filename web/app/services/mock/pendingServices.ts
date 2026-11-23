@@ -1,0 +1,56 @@
+/**
+ * Dev bridge between the real API and the mock (ADR 0010, 0015).
+ *
+ * With the real API the session, users, invitations, companies and profile come
+ * from services/api, but farms, owners, the dashboard, the planner... are still
+ * `planned` in the contract. This module keeps those on the in-memory mock so the
+ * rest of the app stays usable. The mock only knows its own seed users, so each
+ * request acts as the seed user that has the signed-in user's role (the real
+ * company and farm ids do not exist in the mock). Data from the two sides is
+ * therefore not consistent with each other; it is scaffolding, loaded in dev
+ * builds only, and shrinks as endpoints are implemented.
+ */
+import type { ApiServices } from '../ports'
+import type { UserRole } from '~/types/auth'
+import { createMockServices } from './mockServices'
+
+/** Mock services that replace the endpoints still `planned` while the real API serves the rest. */
+export const PENDING_SERVICE_KEYS = [
+  'farms',
+  'fields',
+  'crops',
+  'owners',
+  'dashboard',
+  'planner',
+  'applications',
+  'today',
+  'weather',
+] as const satisfies readonly (keyof ApiServices)[]
+
+/** Seed user (mock) that stands in for each real role. */
+export const MOCK_USER_BY_ROLE: Readonly<Record<UserRole, string>> = {
+  super_admin: 'user-bruno',
+  admin: 'user-marina',
+  planning_operator: 'user-carlos',
+}
+
+const MOCK_TOKEN_PREFIX = 'mock-token:'
+
+export interface PendingMockOptions {
+  readonly latencyMs: number
+  /** Role of the signed-in (real) user; null/undefined while signed out. */
+  readonly getRole: () => UserRole | null | undefined
+}
+
+/** `real` with the still-`planned` services swapped for the mock. */
+export function createPendingMockServices(real: ApiServices, options: PendingMockOptions): ApiServices {
+  const mock = createMockServices({
+    latencyMs: options.latencyMs,
+    getAccessToken: () => {
+      const role = options.getRole()
+      return role ? `${MOCK_TOKEN_PREFIX}${MOCK_USER_BY_ROLE[role]}` : null
+    },
+  })
+  const replacements = Object.fromEntries(PENDING_SERVICE_KEYS.map(key => [key, mock[key]]))
+  return { ...real, ...replacements }
+}

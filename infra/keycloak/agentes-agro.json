@@ -2,7 +2,6 @@
   "product": "agentes-agro",
   "realm": "inceres",
   "productClient": "agentes-agro",
-
   "clients": [
     {
       "clientId": "agentes-agro",
@@ -22,13 +21,22 @@
       "consentRequired": false,
       "rootUrl": "${WEB_URL}",
       "baseUrl": "/",
-      "redirectUris": ["${API_URL}/auth/callback"],
+      "redirectUris": [
+        "${API_URL}/auth/callback",
+        "${API_URL}/auth/login"
+      ],
       "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
         "backchannel.logout.url": "${API_INTERNAL_URL}/auth/backchannel-logout",
         "backchannel.logout.session.required": "true",
-        "backchannel.logout.revoke.offline.tokens": "false"
+        "backchannel.logout.revoke.offline.tokens": "false",
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "standard.token.exchange.enabled": "false",
+        "require.pushed.authorization.requests": "false",
+        "access.token.signed.response.alg": "RS256",
+        "use.refresh.tokens": "true"
       },
       "protocolMappers": [
         {
@@ -41,8 +49,25 @@
             "id.token.claim": "false",
             "introspection.token.claim": "true"
           }
+        },
+        {
+          "name": "client-roles-agentes-agro",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "config": {
+            "usermodel.clientRoleMapping.clientId": "agentes-agro",
+            "claim.name": "resource_access.agentes-agro.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false",
+            "introspection.token.claim": "true",
+            "lightweight.claim": "false"
+          }
         }
-      ]
+      ],
+      "adminUrl": ""
     },
     {
       "clientId": "agentes-agro-provisioner",
@@ -61,41 +86,94 @@
       "frontchannelLogout": false,
       "consentRequired": false,
       "redirectUris": [],
-      "webOrigins": []
+      "webOrigins": [],
+      "adminUrl": "",
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false",
+        "oidc.ciba.grant.enabled": "false",
+        "standard.token.exchange.enabled": "false",
+        "require.pushed.authorization.requests": "false",
+        "access.token.signed.response.alg": "RS256",
+        "client_credentials.use_refresh_token": "false",
+        "access.token.lifespan": "120"
+      }
     }
   ],
-
   "serviceAccountRoles": [
     {
       "client": "agentes-agro-provisioner",
       "target": "realm-management",
-      "roles": ["manage-users", "view-users"]
+      "roles": [
+        "manage-users",
+        "view-users"
+      ]
     }
   ],
-
   "scopeMappings": [
     {
       "client": "agentes-agro-provisioner",
       "target": "realm-management",
-      "roles": ["manage-users", "view-users"]
+      "roles": [
+        "manage-users",
+        "view-users"
+      ]
     }
   ],
-
   "clientScopes": [
-    { "client": "agentes-agro-provisioner", "default": ["kc-admin-api"] }
+    {
+      "client": "agentes-agro",
+      "default": [
+        "acr",
+        "profile",
+        "basic",
+        "email"
+      ],
+      "optional": []
+    },
+    {
+      "client": "agentes-agro-provisioner",
+      "default": [
+        "service_account",
+        "basic",
+        "kc-admin-api"
+      ],
+      "optional": []
+    }
   ],
-
   "permissions": [
-    { "name": "dashboard.view", "description": "Ver o Painel do administrador" },
-    { "name": "companies.manage", "description": "Gerenciar empresas clientes (super admin)" },
-    { "name": "users.manage", "description": "Gerenciar usuários e convites da própria empresa" },
-    { "name": "users.manage_all", "description": "Gerenciar usuários de todas as empresas (super admin)" },
-    { "name": "registry.write", "description": "Criar e editar fazendas, talhões e proprietários" },
-    { "name": "applications.register", "description": "Registrar aplicações" },
-    { "name": "applications.confirm", "description": "Confirmar aplicações" },
-    { "name": "planner.use", "description": "Usar o Planejador e o agente" }
+    {
+      "name": "dashboard.view",
+      "description": "Ver o Painel do administrador"
+    },
+    {
+      "name": "companies.manage",
+      "description": "Gerenciar empresas clientes (super admin)"
+    },
+    {
+      "name": "users.manage",
+      "description": "Gerenciar usuários e convites da própria empresa"
+    },
+    {
+      "name": "users.manage_all",
+      "description": "Gerenciar usuários de todas as empresas (super admin)"
+    },
+    {
+      "name": "registry.write",
+      "description": "Criar e editar fazendas, talhões e proprietários"
+    },
+    {
+      "name": "applications.register",
+      "description": "Registrar aplicações"
+    },
+    {
+      "name": "applications.confirm",
+      "description": "Confirmar aplicações"
+    },
+    {
+      "name": "planner.use",
+      "description": "Usar o Planejador e o agente"
+    }
   ],
-
   "profiles": [
     {
       "name": "super_admin",
@@ -126,14 +204,54 @@
     {
       "name": "planning_operator",
       "description": "Operador de planejamento: usa o Planejador e registra aplicações nas fazendas liberadas",
-      "permissions": ["applications.register", "planner.use"]
+      "permissions": [
+        "applications.register",
+        "planner.use"
+      ]
     }
   ],
-
   "groups": [
-    { "path": "/agentes-agro" },
-    { "path": "/agentes-agro/super-admins", "role": "super_admin" },
-    { "path": "/agentes-agro/admins", "role": "admin" },
-    { "path": "/agentes-agro/planning-operators", "role": "planning_operator" }
-  ]
+    {
+      "path": "/agentes-agro"
+    },
+    {
+      "path": "/agentes-agro/super-admins",
+      "role": "super_admin"
+    },
+    {
+      "path": "/agentes-agro/admins",
+      "role": "admin"
+    },
+    {
+      "path": "/agentes-agro/planning-operators",
+      "role": "planning_operator"
+    }
+  ],
+  "realmRequirements": {
+    "equals": {
+      "registrationAllowed": false,
+      "verifyEmail": true,
+      "duplicateEmailsAllowed": false,
+      "eventsEnabled": true,
+      "adminEventsEnabled": true,
+      "bruteForceProtected": true
+    },
+    "oneOf": {
+      "sslRequired": [
+        "external",
+        "all"
+      ]
+    },
+    "passwordPolicy": {
+      "minLength": 8,
+      "required": [
+        "digits",
+        "lowerCase"
+      ]
+    },
+    "warnWhenNot": {
+      "revokeRefreshToken": true,
+      "adminPermissionsEnabled": true
+    }
+  }
 }

@@ -6,6 +6,7 @@
 import type { UserAccount, UserFilters, UserStatus, UsersSummary } from '~/types/admin'
 import type { UserRole } from '~/types/auth'
 import { USER_ROLE_LABELS } from './labels'
+import { DISPLAY_TIME_ZONE } from './timeZone'
 
 export type UserListFilter = 'all' | UserRole | 'invited'
 export type UserRowActionKind = 'edit_access' | 'deactivate' | 'activate' | 'resend_invitation' | 'cancel_invitation'
@@ -132,8 +133,6 @@ export function userFilterCount(filter: UserListFilter, summary: UsersSummary | 
 
 // ---- last access ----------------------------------------------------------
 
-/** Fixed zone so SSR and client render the same text (the product is used in Brazil). */
-export const DISPLAY_TIME_ZONE = 'America/Sao_Paulo'
 const MINUTE_MS = 60_000
 const HOUR_MS = 60 * MINUTE_MS
 const RECENT_HOURS = 3

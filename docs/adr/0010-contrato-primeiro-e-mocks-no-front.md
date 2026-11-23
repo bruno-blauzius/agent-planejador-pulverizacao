@@ -37,6 +37,8 @@ O CLAUDE.md exige que o front fale **apenas** com `services/api`, que componente
 
 ## Adendo (2026-11-21): cookie do token de acesso
 
+> **Superado em 2026-11-22 pela Fase B do ADR 0015.** Com a API real, a sessão é o cookie `HttpOnly` `agro_session` definido pela própria API; `useAuthToken` e o cookie `agro_access_token` existem só no mock. O texto abaixo fica como histórico.
+
 **Situação temporária adotada.** O token Bearer devolvido por `POST /auth/login` fica no cookie `agro_access_token`, gravado pelo front (`useAuthToken`) com:
 
 - `expires` igual ao `expires_at` da resposta de login: o cookie some junto com o token;
@@ -50,3 +52,7 @@ O cookie é **não-httpOnly**, porque é o JavaScript do cliente que o escreve. 
 ## Adendo (2026-11-21): login por e-mail ou CPF e "Manter conectado"
 
 A tela de login (Figma 6:76) pede "E-mail ou CPF" e "Manter conectado". Como `POST /auth/login` ainda está `planned`, o contrato mudou sem custo de migração: o `LoginRequest` passou a ser `{ identifier, password, remember_me }`. Com `remember_me: true`, a API devolve um `expires_at` mais longo, e o cookie do front segue esse valor. No mock, as durações são 8 h e 30 dias; na API, serão configuração.
+
+## Adendo (2026-11-22): mock parcial com a API real
+
+Com a sessão, os usuários, os convites, as empresas e o perfil implementados na API (ADR 0015), o mock deixou de ser tudo ou nada. `NUXT_PUBLIC_API_MOCK_PENDING=true` (só em build de desenvolvimento) usa os adaptadores HTTP e troca por mock apenas os serviços cujo contrato ainda é `planned` (fazendas, talhões, culturas, proprietários, painel, planejador, aplicações, "Hoje" e clima; lista em `services/mock/pendingServices.ts`). O mock só conhece os próprios usuários de seed, então cada chamada age como o usuário de seed que tem o mesmo papel do usuário real; os ids de empresa e fazenda reais não existem nele, e os dados dos dois lados não são consistentes entre si. É andaime: encolhe a cada endpoint implementado e sai com `services/mock/`.

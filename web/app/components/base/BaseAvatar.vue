@@ -1,6 +1,6 @@
 <script lang="ts">
 export type AvatarTone = 'coffee' | 'green' | 'earth' | 'forest' | 'dark'
-export type AvatarSize = 'sm' | 'md' | 'xl'
+export type AvatarSize = 'sm' | 'md' | 'lg' | 'xl'
 
 const TONES: readonly AvatarTone[] = ['coffee', 'green', 'earth', 'forest', 'dark']
 
@@ -14,8 +14,8 @@ export function avatarToneFor(seed: string): AvatarTone {
 <script setup lang="ts">
 /**
  * Avatar with initials (library "Avatar" 26:173: white ring, earth/green tones).
- * sm = 32 px (sidebar user, farm card, wizard), md = 38 px (owner/user tables),
- * xl = 120 px (profile identity, Figma 54:904).
+ * sm = 32 px (sidebar user, farm card, wizard), md = 38 px (owner table, Figma 39:652),
+ * lg = 40 px (users table, Figma 52:411), xl = 120 px (profile identity, Figma 54:904).
  * Decorative by default: the person's name is shown next to it.
  */
 const props = withDefaults(
@@ -29,7 +29,12 @@ const props = withDefaults(
   { seed: undefined, tone: undefined, size: 'sm' },
 )
 
-const TEXT_CLASS: Record<AvatarSize, string> = { sm: 'text-label-badge', md: 'text-label-strong', xl: 'text-h2' }
+const TEXT_CLASS: Record<AvatarSize, string> = {
+  sm: 'text-label-badge',
+  md: 'text-label-strong',
+  lg: 'text-label-strong',
+  xl: 'text-h2',
+}
 
 const resolvedTone = computed<AvatarTone>(() => props.tone ?? avatarToneFor(props.seed ?? props.initials))
 </script>
@@ -62,6 +67,11 @@ const resolvedTone = computed<AvatarTone>(() => props.tone ?? avatarToneFor(prop
 .base-avatar--md {
   width: var(--size-avatar-md);
   height: var(--size-avatar-md);
+}
+
+.base-avatar--lg {
+  width: var(--size-avatar-lg);
+  height: var(--size-avatar-lg);
 }
 
 .base-avatar--xl {

@@ -1,7 +1,8 @@
 /**
  * Presentation rules of the profile screen (11). The password rule shown here
  * mirrors the contract text ("mínimo de 8 caracteres, com letras e números");
- * the API is the one that accepts or rejects the new password.
+ * the API is the one that accepts or rejects the new password. Against the real
+ * API the password is Keycloak's (ADR 0015) and this form is not shown.
  */
 import type { FieldError } from '~/services/errors'
 import type { Profile } from '~/types/profile'
@@ -12,6 +13,9 @@ export type ProfileField = 'name' | 'currentPassword' | 'newPassword' | 'confirm
 export type ProfileFieldErrors = Partial<Record<ProfileField, string>>
 
 export const PASSWORD_MIN_LENGTH = 8
+
+/** Keycloak account page (realm `inceres`, local dev) used when `NUXT_PUBLIC_ACCOUNT_URL` is empty. */
+export const DEFAULT_ACCOUNT_URL = 'http://localhost:8180/realms/inceres/account'
 
 export const PROFILE_MESSAGES = {
   nameRequired: 'Informe seu nome completo.',

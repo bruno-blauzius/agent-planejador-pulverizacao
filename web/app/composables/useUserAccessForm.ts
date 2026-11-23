@@ -1,5 +1,5 @@
 import { computed, reactive, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import type { ApiError } from '~/services/errors'
+import { hasCuratedMessage, type ApiError } from '~/services/errors'
 import type { UserAccount } from '~/types/admin'
 import type { CompanyRef } from '~/types/auth'
 import {
@@ -19,6 +19,7 @@ import {
   type UserAccessField,
   type UserAccessValues,
 } from '~/utils/userAccessForm'
+import { invitationCreatedNotice } from '~/utils/invitation'
 import { useResource } from './internal/resource'
 import { useApiServices } from './useApiServices'
 import { useFarms } from './useFarms'
@@ -33,7 +34,9 @@ const COMPANY_OPTIONS_PAGE_SIZE = 100
 
 function formErrorFor(error: ApiError): string | null {
   if (error.code === 'validation_failed' && error.details.length > 0) return null
-  if (error.code === 'conflict') return null
+  if (error.code === 'conflict' || error.code === 'email_already_registered') return null
+  // Contract codes with a fixed meaning (inactive company, e-mail not verified, SSO down...) carry their own text.
+  if (hasCuratedMessage(error.code)) return error.message
   if (error.code === 'forbidden' || error.code === 'out_of_scope') return USER_ACCESS_MESSAGES.forbidden
   if (error.code === 'network_error') return USER_ACCESS_MESSAGES.network
   if (error.code === 'not_found') return USER_ACCESS_MESSAGES.notFound
@@ -62,8 +65,14 @@ export function useUserAccessForm(options: { user?: MaybeRefOrGetter<UserAccount
   )
   const showApiError = ref(false)
 
-  watch(account, (current) => {
-    if (current) Object.assign(values, accountToValues(current))
+  // Only a different account rehydrates: a list refresh hands over a new object for the same
+  // account and must not erase what the user is editing.
+  watch(() => account.value?.id, () => {
+    if (!account.value) return
+    Object.assign(values, accountToValues(account.value))
+    USER_ACCESS_FIELDS.forEach((field) => {
+      touched[field] = false
+    })
   }, { immediate: true })
 
   // Companies other than the caller's own are only listed with `companies.manage`.
@@ -79,6 +88,8 @@ export function useUserAccessForm(options: { user?: MaybeRefOrGetter<UserAccount
     () => (sessionCompany.value ? [sessionCompany.value] : []),
   )
   const farms = useFarms({ pageSize: FARM_OPTIONS_PAGE_SIZE })
+
+  const farmsUnavailable = computed(() => farms.error.value !== null)
 
   // Super admins belong to the platform operator, i.e. the caller's company (the API validates).
   const companyLocked = computed(() => !can('companies.manage') || values.role === 'super_admin')
@@ -112,7 +123,8 @@ export function useUserAccessForm(options: { user?: MaybeRefOrGetter<UserAccount
       if (touched[field] && localErrors.value[field]) visibleLocal[field] = localErrors.value[field]
     }
     const error = apiError.value
-    const fromApi = error?.code === 'conflict' ? { email: USER_ACCESS_MESSAGES.emailTaken } : userAccessErrorsFromApi(error?.details ?? [])
+    const emailTaken = error?.code === 'conflict' || error?.code === 'email_already_registered'
+    const fromApi = emailTaken ? { email: USER_ACCESS_MESSAGES.emailTaken } : userAccessErrorsFromApi(error?.details ?? [])
     return { ...fromApi, ...visibleLocal }
   })
 
@@ -139,12 +151,7 @@ export function useUserAccessForm(options: { user?: MaybeRefOrGetter<UserAccount
     const invited = await actions.invite(toInvitationInput(values))
     showApiError.value = invited === null
     if (!invited) return false
-    flash.show({
-      kind: 'success',
-      title: 'Convite enviado',
-      description: `${invited.name} vai receber um e-mail em ${invited.email} para criar a senha.`,
-      highlightId: invited.id,
-    })
+    flash.show({ ...invitationCreatedNotice(invited.user, invited.emailStatus), highlightId: invited.user.id })
     return true
   }
 
@@ -168,7 +175,13 @@ export function useUserAccessForm(options: { user?: MaybeRefOrGetter<UserAccount
     roleOptions: computed(() => userRoleOptions(can('users.manage_all'), isSelf.value ? (account.value?.role ?? null) : null)),
     companyOptions: computed(() => companies.data.value.map(item => ({ value: item.id, label: item.name }))),
     companyLocked,
-    scopeOptions: computed(() => (['all', 'selected'] as const).map((value: FarmScopeMode) => ({ value, label: FARM_SCOPE_LABELS[value] }))),
+    scopeOptions: computed(() => (['all', 'selected'] as const).map((value: FarmScopeMode) => ({
+      value,
+      label: FARM_SCOPE_LABELS[value],
+      // Without a farm list there is nothing to select; an edited account already scoped keeps its value.
+      disabled: value === 'selected' && farmsUnavailable.value && values.farmScopeMode !== 'selected',
+    }))),
+    farmsUnavailable,
     scopeLocked,
     farmOptions: computed(() => farms.farms.value
       .filter(farm => farm.companyId === values.companyId)
@@ -179,6 +192,7 @@ export function useUserAccessForm(options: { user?: MaybeRefOrGetter<UserAccount
     submit,
     saving,
     pending: computed(() => companies.pending.value || farms.pending.value),
-    loadError: computed(() => companies.error.value ?? farms.error.value),
+    // Only companies block the form: a farm list that failed (e.g. endpoint not available yet) does not.
+    loadError: computed(() => companies.error.value),
   }
 }

@@ -1,5 +1,5 @@
 /** DTO (snake_case, api/openapi.yaml) <-> front model. Pure functions. */
-import type { AuthSession, Credentials, FarmScope, User } from '~/types/auth'
+import type { FarmScope, User } from '~/types/auth'
 import type {
   FarmDto,
   FarmInputDto,
@@ -8,8 +8,6 @@ import type {
   FarmSummaryDto,
   FieldDto,
   FieldInputDto,
-  LoginRequestDto,
-  LoginResponseDto,
   OwnerDocumentDto,
   OwnerDto,
   OwnerFarmLinkDto,
@@ -56,18 +54,6 @@ export function toUser(dto: UserDto): User {
     farmScope: toFarmScope(dto.farm_scope),
     permissions: dto.permissions,
   }
-}
-
-export function toLoginRequestDto(credentials: Credentials): LoginRequestDto {
-  return {
-    identifier: credentials.identifier.trim(),
-    password: credentials.password,
-    remember_me: credentials.rememberMe,
-  }
-}
-
-export function toAuthSession(dto: LoginResponseDto): AuthSession {
-  return { accessToken: dto.access_token, expiresAt: new Date(dto.expires_at), user: toUser(dto.user) }
 }
 
 function toFarmOwnerShare(dto: FarmOwnerShareDto): FarmOwnerShare {

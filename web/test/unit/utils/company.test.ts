@@ -11,6 +11,12 @@ describe('company presentation', () => {
     expect(applicationsTrendCaption(3, 0, now)).toBe('Primeiro mês com aplicações')
   })
 
+  it('takes the previous month in the display time zone (São Paulo), not UTC', () => {
+    // 1 Dec 01:00 UTC is still 30 Nov 22:00 in São Paulo: previous month = outubro.
+    expect(applicationsTrendCaption(31, 26, new Date('2026-12-01T01:00:00Z'))).toBe('+19% vs. outubro')
+    expect(applicationsTrendCaption(31, 26, new Date('2026-01-15T12:00:00Z'))).toBe('+19% vs. dezembro')
+  })
+
   it('labels the pagination range', () => {
     expect(buildCompanyPagination(2, 10, 23)).toEqual({
       rangeLabel: 'Mostrando 11–20 de 23', page: 2, pageCount: 3, canPrevious: true, canNext: true,

@@ -12,8 +12,12 @@ withDefaults(
     /** Shows "Ver todas" (the user can use the planner). */
     showSeeAll?: boolean
     seeAllUnavailableHint?: string
+    /** Data still loading (nothing to show yet). */
+    pending?: boolean
+    /** Loading failed: never claim the block is empty. */
+    failed?: boolean
   }>(),
-  { showSeeAll: false, seeAllUnavailableHint: 'Em breve' },
+  { showSeeAll: false, seeAllUnavailableHint: 'Em breve', pending: false, failed: false },
 )
 
 const titleId = useId()
@@ -28,7 +32,9 @@ const titleId = useId()
       </BaseButton>
     </header>
 
-    <p v-if="windows.length === 0" class="upcoming__empty text-body-md">Nenhuma janela prevista para os próximos dias.</p>
+    <DashboardBlockStatus v-if="windows.length === 0" :pending="pending" :failed="failed">
+      Nenhuma janela prevista para os próximos dias.
+    </DashboardBlockStatus>
     <ul v-else class="upcoming__list">
       <li v-for="item in windows" :key="item.key" class="upcoming__item">
         <span class="upcoming__field text-label-strong" :class="{ 'upcoming__field--highlight': item.isHighlighted }">
@@ -115,8 +121,4 @@ const titleId = useId()
   color: var(--color-text-tertiary);
 }
 
-.upcoming__empty {
-  margin: 0;
-  color: var(--color-text-secondary);
-}
 </style>

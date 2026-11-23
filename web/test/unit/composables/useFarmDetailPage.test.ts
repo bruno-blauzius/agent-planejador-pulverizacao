@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useFarmDetailPage } from '~/composables/useFarmDetailPage'
 import { createTestApi } from '../../support/mockApi'
 import { flushPromises, installNuxtFakes, type NuxtFakes } from '../../support/nuxtFakes'
+import { SEED_LOGINS } from '../../support/session'
+import { AUTH_TOKEN_COOKIE } from '~/composables/useAuthToken'
+import { useSession } from '~/composables/useSession'
+import { createMockServices } from '~/services/mock/mockServices'
+import { createSeed, TEST_PASSWORD } from '~/services/mock/seed'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -137,6 +142,36 @@ describe('useFarmDetailPage', () => {
     expect(page.error.value?.code).toBe('not_found')
     expect(page.isEmpty.value).toBe(false)
     expect(page.summary.value.blockCount).toBe('—')
+  })
+
+  it('shows a farm outside the operator scope as forbidden, not as not found', async () => {
+    // The seed releases Carlos only farm-santa-rita; narrowing it makes that farm out of scope (403).
+    const seed = createSeed()
+    const carlos = seed.users.find(user => user.email === SEED_LOGINS.operator)!
+    carlos.farmScope = { mode: 'selected', farmIds: ['farm-ouro-verde'] }
+    const fakes = installNuxtFakes(nuxt => createMockServices({
+      latencyMs: 0,
+      seed,
+      getAccessToken: () => nuxt.cookie(AUTH_TOKEN_COOKIE).value,
+    }))
+    await useSession().login({ identifier: SEED_LOGINS.operator, password: TEST_PASSWORD, rememberMe: false })
+    fakes.route.path = '/farms/farm-santa-rita'
+
+    const page = useFarmDetailPage('farm-santa-rita', { now: NOW })
+    await flushPromises()
+
+    expect(page.error.value?.code).toBe('out_of_scope')
+    expect(page.isForbidden.value).toBe(true)
+    expect(page.isNotFound.value).toBe(false)
+  })
+
+  it('does not flag forbidden for a visible farm or an unknown one', async () => {
+    setup()
+    const visible = useFarmDetailPage('farm-santa-rita', { now: NOW })
+    const missing = useFarmDetailPage('farm-missing', { now: NOW })
+    await flushPromises()
+    expect(visible.isForbidden.value).toBe(false)
+    expect(missing.isForbidden.value).toBe(false)
   })
 
   it('exposes the actions without endpoint as disabled', async () => {

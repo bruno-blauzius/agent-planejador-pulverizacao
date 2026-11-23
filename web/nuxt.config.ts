@@ -39,6 +39,7 @@ export default defineNuxtConfig({
       // Fonts from the Figma foundations. Loaded from Google Fonts to avoid a new
       // dependency; @nuxt/fonts (self-hosting) can replace this if approved.
       link: [
+        { rel: 'icon', type: 'image/svg+xml', href: '/brand/icon.svg' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         {
@@ -62,10 +63,20 @@ export default defineNuxtConfig({
     // Overridden by NUXT_API_BASE_URL; empty falls back to public.apiBase.
     apiBaseUrl: '',
     public: {
-      // Browser base URL. Overridden by NUXT_PUBLIC_API_BASE.
+      // Browser base URL. Overridden by NUXT_PUBLIC_API_BASE. The session is an
+      // HttpOnly cookie set by this host (ADR 0015): open the web app on the same
+      // host name (localhost, not 127.0.0.1) so the cookie is same-site.
       apiBase: 'http://localhost:8080',
-      // true = in-memory services instead of HTTP. NUXT_PUBLIC_API_MOCK=true.
+      // true = in-memory services instead of HTTP, login form included (dev builds
+      // only). NUXT_PUBLIC_API_MOCK=true.
       apiMock: false,
+      // With the real API: endpoints still `planned` in the contract (farms, owners,
+      // dashboard, planner...) use the in-memory mock, acting as the seed user of the
+      // signed-in user's role. Dev builds only. NUXT_PUBLIC_API_MOCK_PENDING=true.
+      apiMockPending: false,
+      // Keycloak account page of the Inceres SSO, where the password is changed
+      // (ADR 0015). NUXT_PUBLIC_ACCOUNT_URL.
+      accountUrl: 'http://localhost:8180/realms/inceres/account',
       // Simulated latency of the mock. NUXT_PUBLIC_API_MOCK_LATENCY_MS.
       apiMockLatencyMs: 300,
       // Vector tiles (TileJSON) for the map basemap (ADR 0012). NUXT_PUBLIC_MAP_TILES_URL.

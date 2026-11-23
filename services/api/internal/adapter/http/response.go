@@ -13,7 +13,14 @@ type errorBody struct {
 }
 
 type errorDetail struct {
-	Code    string `json:"code"`
+	Code    string        `json:"code"`
+	Message string        `json:"message"`
+	Details []fieldDetail `json:"details,omitempty"`
+}
+
+// fieldDetail points at one invalid input field (only in validation_failed).
+type fieldDetail struct {
+	Field   string `json:"field"`
 	Message string `json:"message"`
 }
 

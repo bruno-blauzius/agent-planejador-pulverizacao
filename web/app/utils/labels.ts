@@ -1,4 +1,5 @@
 /** pt-BR labels of contract enums, as written in the Figma screens. */
+import type { ApplicationStatus } from '~/types/application'
 import type { UserRole } from '~/types/auth'
 import type { FarmStatus, ProductionType } from '~/types/farm'
 import type { LinkRole, PersonType } from '~/types/owner'
@@ -24,6 +25,13 @@ export const SPRAY_CONDITION_LABELS: Readonly<Record<SprayCondition, string>> = 
   rain: 'Chuva',
 }
 
+/** Status of an agent check in the planner confirmation (Figma 19:446). */
+export const CHECKLIST_STATUS_LABELS: Readonly<Record<'passed' | 'warning' | 'failed', string>> = {
+  passed: 'Aprovada',
+  warning: 'Atenção',
+  failed: 'Reprovada',
+}
+
 export const PERSON_TYPE_LABELS: Readonly<Record<PersonType, string>> = {
   individual: 'Pessoa física',
   company: 'Pessoa jurídica',
@@ -44,4 +52,11 @@ export const USER_ROLE_LABELS: Readonly<Record<UserRole, string>> = {
   super_admin: 'Super admin',
   admin: 'Administrador',
   planning_operator: 'Operador de planejamento',
+}
+
+export const APPLICATION_STATUS_LABELS: Readonly<Record<ApplicationStatus, string>> = {
+  planned: 'Planejada',
+  in_progress: 'Em andamento',
+  completed: 'Concluída',
+  cancelled: 'Cancelada',
 }

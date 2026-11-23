@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 56" role="img" aria-label="Agentes Agro">
+  <rect x="0" y="6" width="44" height="44" rx="10" fill="#141f0c"/>
+  <g transform="translate(7 13) scale(0.46875)">
+    <path d="M32 56V31" fill="none" stroke="#b5e36a" stroke-width="4.5" stroke-linecap="round"/>
+    <path d="M32 36C19 36 11 28 11 15C24 15 32 23 32 36Z" fill="#b5e36a"/>
+    <path d="M32 31C32 18 40 9 54 9C54 23 45 31 32 31Z" fill="#b5e36a"/>
+    <path d="M50 37L52.2 43.8L59 46L52.2 48.2L50 55L47.8 48.2L41 46L47.8 43.8Z" fill="#b5e36a"/>
+  </g>
+  <g font-family="'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif" font-size="22">
+    <text x="56" y="25" font-weight="800" fill="#141f0c">agentes</text>
+    <text x="56" y="48" font-weight="700" fill="#436b29">agro</text>
+  </g>
+</svg>

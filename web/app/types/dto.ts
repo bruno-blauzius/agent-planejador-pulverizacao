@@ -55,18 +55,6 @@ export interface UserDto {
   readonly permissions: readonly Permission[]
 }
 
-export interface LoginRequestDto {
-  readonly identifier: string
-  readonly password: string
-  readonly remember_me: boolean
-}
-
-export interface LoginResponseDto {
-  readonly access_token: string
-  readonly token_type: 'Bearer'
-  readonly expires_at: string
-  readonly user: UserDto
-}
 
 export type CropDto = Crop
 export type SprayOutlookDto = SprayOutlook
@@ -241,6 +229,7 @@ export interface UsersSummaryDto {
 }
 
 export interface UserUpdateDto {
+  readonly name?: string
   readonly role?: UserRole
   readonly company_id?: string
   readonly farm_scope?: FarmScopeDto
@@ -304,11 +293,6 @@ export interface ProfileDto {
   readonly company: CompanyRefDto
   readonly farm_scope: FarmScopeDto
   readonly password_changed_at: string | null
-}
-
-export interface PasswordChangeDto {
-  readonly current_password: string
-  readonly new_password: string
 }
 
 export interface DashboardDto {

@@ -21,11 +21,20 @@ func TestLoadConfig(t *testing.T) {
 		Port: 8080, LogLevel: slog.LevelInfo,
 		ReadHeaderTimeout: 5 * time.Second, ShutdownTimeout: 15 * time.Second,
 		ProbeTimeout: 2 * time.Second, DocsEnabled: true,
+		InvitationTTL: 72 * time.Hour, TrialDuration: 14 * 24 * time.Hour, LastAccessInterval: 5 * time.Minute,
+		PageSizeDefault: 20, PageSizeMax: 100,
 	}
 	lowestPort := defaults
 	lowestPort.Port = 1
 	withOrigins := defaults
 	withOrigins.CORSAllowedOrigins = []string{"http://localhost:3000", "https://app.example.com"}
+
+	businessValues := defaults
+	businessValues.InvitationTTL = 48 * time.Hour
+	businessValues.TrialDuration = 30 * 24 * time.Hour
+	businessValues.LastAccessInterval = 0
+	businessValues.PageSizeDefault = 10
+	businessValues.PageSizeMax = 50
 
 	tests := []struct {
 		name    string
@@ -45,8 +54,24 @@ func TestLoadConfig(t *testing.T) {
 				Port: 9000, LogLevel: slog.LevelDebug,
 				ReadHeaderTimeout: time.Second, ShutdownTimeout: 30 * time.Second,
 				ProbeTimeout: 500 * time.Millisecond, DocsEnabled: false,
+				InvitationTTL: 72 * time.Hour, TrialDuration: 14 * 24 * time.Hour, LastAccessInterval: 5 * time.Minute,
+				PageSizeDefault: 20, PageSizeMax: 100,
 			},
 		},
+		{
+			name: "overrides the business values",
+			env: map[string]string{
+				"API_INVITATION_TTL": "48h", "API_TRIAL_DURATION": "720h", "API_LAST_ACCESS_INTERVAL": "0s",
+				"API_PAGE_SIZE_DEFAULT": "10", "API_PAGE_SIZE_MAX": "50",
+			},
+			want: businessValues,
+		},
+		{name: "invitation ttl zero is rejected", env: map[string]string{"API_INVITATION_TTL": "0s"}, wantErr: true},
+		{name: "trial duration without unit is rejected", env: map[string]string{"API_TRIAL_DURATION": "14"}, wantErr: true},
+		{name: "negative last access interval is rejected", env: map[string]string{"API_LAST_ACCESS_INTERVAL": "-1m"}, wantErr: true},
+		{name: "page size zero is rejected", env: map[string]string{"API_PAGE_SIZE_DEFAULT": "0"}, wantErr: true},
+		{name: "page size default above max is rejected", env: map[string]string{"API_PAGE_SIZE_DEFAULT": "200"}, wantErr: true},
+		{name: "page size not a number is rejected", env: map[string]string{"API_PAGE_SIZE_MAX": "many"}, wantErr: true},
 		{name: "port at lower bound", env: map[string]string{"API_PORT": "1"}, want: lowestPort},
 		{name: "port zero is rejected", env: map[string]string{"API_PORT": "0"}, wantErr: true},
 		{name: "port above range is rejected", env: map[string]string{"API_PORT": "65536"}, wantErr: true},

@@ -15,6 +15,20 @@ export const STATUS_BY_CODE: Record<Exclude<ApiErrorCode, 'network_error' | 'unk
   unsupported_media_type: 415,
   forbidden: 403,
   out_of_scope: 403,
+  agent_unavailable: 502,
+  weather_unavailable: 502,
+  conditions_changed: 409,
+  user_not_provisioned: 403,
+  no_access_to_product: 403,
+  ambiguous_role: 403,
+  identity_provider_unavailable: 502,
+  email_already_registered: 409,
+  email_not_verified: 409,
+  company_inactive: 409,
+  company_has_active_users: 409,
+  invitation_closed: 409,
+  invitation_pending: 409,
+  last_super_admin: 409,
 }
 
 export type MockErrorCode = keyof typeof STATUS_BY_CODE

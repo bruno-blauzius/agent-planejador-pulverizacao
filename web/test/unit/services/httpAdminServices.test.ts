@@ -10,12 +10,12 @@ interface RecordedCall {
 
 function servicesWith(answer: unknown) {
   const calls: RecordedCall[] = []
-  const http = createHttpClient({ baseURL: 'http://api.test', getAccessToken: () => 't' }, async (path, options) => {
+  const http = createHttpClient({ baseURL: 'http://api.test' }, async (path, options) => {
     calls.push({ path, options })
     if (answer instanceof Error) throw answer
     return answer
   })
-  return { api: createHttpServices(http), calls }
+  return { api: createHttpServices(http, 'http://localhost:8002'), calls }
 }
 
 const invitedDto: UserAccountDto = {
@@ -66,11 +66,6 @@ describe('http user service', () => {
 })
 
 describe('http profile and dashboard services', () => {
-  it('changes the password with snake_case keys', async () => {
-    const { api, calls } = servicesWith(null)
-    await api.profile.changePassword({ currentPassword: 'a', newPassword: 'b' })
-    expect(calls[0]).toMatchObject({ path: '/me/password', options: { method: 'POST', body: { current_password: 'a', new_password: 'b' } } })
-  })
 
   it('maps the dashboard', async () => {
     const dto: DashboardDto = {

@@ -1,0 +1,28 @@
+# Gera internal/adapter/postgres/sqlcgen a partir das migrações (up) e de queries/*.sql.
+# Código gerado é versionado. Regerar: make api-sqlc (versão do sqlc fixada no Makefile).
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/adapter/postgres/queries
+    gen:
+      go:
+        package: sqlcgen
+        out: internal/adapter/postgres/sqlcgen
+        sql_package: pgx/v5
+        overrides:
+          - db_type: uuid
+            go_type: string
+          - db_type: uuid
+            nullable: true
+            go_type:
+              type: string
+              pointer: true
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              import: time
+              type: Time
+              pointer: true

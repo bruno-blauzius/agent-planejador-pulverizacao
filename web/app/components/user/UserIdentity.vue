@@ -13,7 +13,7 @@ defineProps<{
 
 <template>
   <span class="user-identity">
-    <BaseAvatar :initials="initials" :seed="id" size="md" />
+    <BaseAvatar :initials="initials" :seed="id" size="lg" />
     <span class="user-identity__text">
       <span class="user-identity__name text-label-strong">{{ name }}</span>
       <span class="user-identity__email text-body-sm">{{ email }}</span>

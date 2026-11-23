@@ -7,9 +7,16 @@ import type { AgentAlertView } from '~/utils/dashboard'
  * highlight, info) that can be dismissed. Dismissing is local to this visit
  * (no endpoint yet); the caller decides.
  */
-defineProps<{
-  alerts: readonly AgentAlertView[]
-}>()
+withDefaults(
+  defineProps<{
+    alerts: readonly AgentAlertView[]
+    /** Data still loading (nothing to show yet). */
+    pending?: boolean
+    /** Loading failed: never claim the block is empty. */
+    failed?: boolean
+  }>(),
+  { pending: false, failed: false },
+)
 
 const emit = defineEmits<{
   dismiss: [id: string]
@@ -27,7 +34,9 @@ const titleId = useId()
 <template>
   <section class="agent-alerts" :aria-labelledby="titleId">
     <h2 :id="titleId" class="agent-alerts__title text-h4">Alertas do agente</h2>
-    <p v-if="alerts.length === 0" class="agent-alerts__empty text-body-md">Nenhum alerta no momento.</p>
+    <DashboardBlockStatus v-if="alerts.length === 0" :pending="pending" :failed="failed">
+      Nenhum alerta no momento.
+    </DashboardBlockStatus>
     <ToastAlert
       v-for="alert in alerts"
       :key="alert.id"
@@ -58,8 +67,4 @@ const titleId = useId()
   color: var(--color-text-primary);
 }
 
-.agent-alerts__empty {
-  margin: 0;
-  color: var(--color-text-secondary);
-}
 </style>

@@ -19,6 +19,12 @@ const (
 	defaultShutdownTimeout   = 15 * time.Second
 	defaultProbeTimeout      = 2 * time.Second
 	defaultDocsEnabled       = true
+
+	defaultInvitationTTL      = 72 * time.Hour
+	defaultTrialDuration      = 14 * 24 * time.Hour
+	defaultLastAccessInterval = 5 * time.Minute
+	defaultPageSize           = 20
+	defaultMaxPageSize        = 100
 )
 
 // Config is the immutable runtime configuration of the API.
@@ -30,6 +36,14 @@ type Config struct {
 	ProbeTimeout       time.Duration
 	DocsEnabled        bool
 	CORSAllowedOrigins []string
+
+	// Business values of the use cases (usecase.Settings is built from them in
+	// the composition root; platform does not import the use case layer).
+	InvitationTTL      time.Duration // API_INVITATION_TTL
+	TrialDuration      time.Duration // API_TRIAL_DURATION
+	LastAccessInterval time.Duration // API_LAST_ACCESS_INTERVAL (0 disables the limit)
+	PageSizeDefault    int           // API_PAGE_SIZE_DEFAULT
+	PageSizeMax        int           // API_PAGE_SIZE_MAX
 }
 
 // LookupFunc matches os.LookupEnv, so tests can inject a fake environment.
@@ -38,7 +52,10 @@ type LookupFunc func(key string) (string, bool)
 // LoadConfig reads the configuration from environment variables:
 // API_PORT, API_LOG_LEVEL, API_READ_HEADER_TIMEOUT, API_SHUTDOWN_TIMEOUT,
 // API_PROBE_TIMEOUT, API_DOCS_ENABLED and API_CORS_ALLOWED_ORIGINS (comma
-// separated origins such as http://localhost:3000; unset or empty disables CORS).
+// separated origins such as http://localhost:3000; unset or empty disables CORS),
+// API_INVITATION_TTL (default 72h), API_TRIAL_DURATION (default 336h),
+// API_LAST_ACCESS_INTERVAL (default 5m, 0 disables the limit),
+// API_PAGE_SIZE_DEFAULT (default 20) and API_PAGE_SIZE_MAX (default 100).
 func LoadConfig(lookup LookupFunc) (Config, error) {
 	cfg := Config{
 		Port:              defaultPort,
@@ -47,6 +64,12 @@ func LoadConfig(lookup LookupFunc) (Config, error) {
 		ShutdownTimeout:   defaultShutdownTimeout,
 		ProbeTimeout:      defaultProbeTimeout,
 		DocsEnabled:       defaultDocsEnabled,
+
+		InvitationTTL:      defaultInvitationTTL,
+		TrialDuration:      defaultTrialDuration,
+		LastAccessInterval: defaultLastAccessInterval,
+		PageSizeDefault:    defaultPageSize,
+		PageSizeMax:        defaultMaxPageSize,
 	}
 
 	if raw, ok := lookup("API_PORT"); ok {
@@ -70,6 +93,8 @@ func LoadConfig(lookup LookupFunc) (Config, error) {
 		{"API_READ_HEADER_TIMEOUT", &cfg.ReadHeaderTimeout},
 		{"API_SHUTDOWN_TIMEOUT", &cfg.ShutdownTimeout},
 		{"API_PROBE_TIMEOUT", &cfg.ProbeTimeout},
+		{"API_INVITATION_TTL", &cfg.InvitationTTL},
+		{"API_TRIAL_DURATION", &cfg.TrialDuration},
 	}
 	for _, d := range durations {
 		raw, ok := lookup(d.key)
@@ -81,6 +106,10 @@ func LoadConfig(lookup LookupFunc) (Config, error) {
 			return Config{}, fmt.Errorf("invalid %s %q: must be a positive duration such as 5s", d.key, raw)
 		}
 		*d.target = value
+	}
+
+	if err := loadBusinessSettings(lookup, &cfg); err != nil {
+		return Config{}, err
 	}
 
 	if raw, ok := lookup("API_DOCS_ENABLED"); ok {
@@ -123,4 +152,39 @@ func parseOrigins(raw string) ([]string, error) {
 		origins = append(origins, origin)
 	}
 	return origins, nil
+}
+
+// loadBusinessSettings reads the values that feed usecase.Settings. A zero
+// last access interval is valid (it writes last_access_at on every request).
+func loadBusinessSettings(lookup LookupFunc, cfg *Config) error {
+	if raw, ok := lookup("API_LAST_ACCESS_INTERVAL"); ok {
+		value, err := time.ParseDuration(raw)
+		if err != nil || value < 0 {
+			return fmt.Errorf("invalid API_LAST_ACCESS_INTERVAL %q: must be a duration such as 5m (0 disables the limit)", raw)
+		}
+		cfg.LastAccessInterval = value
+	}
+
+	sizes := []struct {
+		key    string
+		target *int
+	}{
+		{"API_PAGE_SIZE_DEFAULT", &cfg.PageSizeDefault},
+		{"API_PAGE_SIZE_MAX", &cfg.PageSizeMax},
+	}
+	for _, size := range sizes {
+		raw, ok := lookup(size.key)
+		if !ok {
+			continue
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 {
+			return fmt.Errorf("invalid %s %q: must be a positive integer", size.key, raw)
+		}
+		*size.target = value
+	}
+	if cfg.PageSizeDefault > cfg.PageSizeMax {
+		return fmt.Errorf("API_PAGE_SIZE_DEFAULT (%d) must not exceed API_PAGE_SIZE_MAX (%d)", cfg.PageSizeDefault, cfg.PageSizeMax)
+	}
+	return nil
 }

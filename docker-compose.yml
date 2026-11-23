@@ -23,6 +23,14 @@ x-app-hardening: &app-hardening
     - no-new-privileges:true
   cap_drop:
     - ALL
+  # Teto de 1 CPU e 1 GB por container de aplicação (o Postgres tem o seu próprio limite).
+  # Estourar a memória faz o Docker matar o container (OOM), por isso o runtime
+  # de cada serviço é ajustado abaixo para ficar sempre abaixo do teto.
+  deploy:
+    resources:
+      limits:
+        cpus: "1.0"
+        memory: 1g
   logging:
     driver: json-file
     options:
@@ -86,11 +94,37 @@ services:
     image: agentes-agro/api:dev
     environment:
       API_PORT: "8080"
+      # Coletor de lixo do Go respeita o teto do container (1 GB), com folga para stacks e buffers.
+      GOMEMLIMIT: 800MiB
+      GOMAXPROCS: "1"
       API_LOG_LEVEL: ${API_LOG_LEVEL:-info}
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-true}
       API_CORS_ALLOWED_ORIGINS: ${API_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      # Usado a partir da Fase 3 (pgx). Senhas devem ser URL-safe.
+      # Papel de runtime (api_app: só DML). As senhas devem ser URL-safe.
       API_DATABASE_URL: postgres://api_app:${API_DB_APP_PASSWORD}@agro-postgres:5432/api?sslmode=disable
+      # Keycloak do infra-docker (ADR 0015). A API o chama pelo endereço interno da rede inceres-infra;
+      # o emissor (iss dos tokens) é o endereço público que o navegador enxerga.
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-inceres}
+      KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8180}
+      KEYCLOAK_PROVISIONER_CLIENT_ID: ${KEYCLOAK_PROVISIONER_CLIENT_ID:-agentes-agro-provisioner}
+      KEYCLOAK_PROVISIONER_CLIENT_SECRET: ${KEYCLOAK_PROVISIONER_CLIENT_SECRET:-}
+      KEYCLOAK_AGENTES_AGRO_CLIENT_ID: ${KEYCLOAK_AGENTES_AGRO_CLIENT_ID:-agentes-agro}
+      KEYCLOAK_AGENTES_AGRO_CLIENT_SECRET: ${KEYCLOAK_AGENTES_AGRO_CLIENT_SECRET:-}
+      # URL pública da API: vira a redirect_uri (<url>/auth/callback) e o link dos e-mails de convite.
+      AGENTES_AGRO_API_URL: ${AGENTES_AGRO_API_URL:-http://localhost:${API_HOST_PORT:-8080}}
+      # URL pública do front: o /auth/callback redireciona para <url><return_to> e <url>/login?error=<código>.
+      AGENTES_AGRO_WEB_URL: ${AGENTES_AGRO_WEB_URL:-http://localhost:${WEB_HOST_PORT:-3000}}
+      # Sessão do navegador (cookie opaco). A chave cifra o refresh token em repouso: base64 de 32 bytes.
+      API_SESSION_ENC_KEY: ${API_SESSION_ENC_KEY:-}
+      API_SESSION_ENC_KEY_ID: ${API_SESSION_ENC_KEY_ID:-1}
+      API_SESSION_ENC_OLD_KEYS: ${API_SESSION_ENC_OLD_KEYS:-}
+      # Valores de negócio dos casos de uso.
+      API_INVITATION_TTL: ${API_INVITATION_TTL:-72h}
+      API_TRIAL_DURATION: ${API_TRIAL_DURATION:-336h}
+      API_LAST_ACCESS_INTERVAL: ${API_LAST_ACCESS_INTERVAL:-5m}
+      API_PAGE_SIZE_DEFAULT: ${API_PAGE_SIZE_DEFAULT:-20}
+      API_PAGE_SIZE_MAX: ${API_PAGE_SIZE_MAX:-100}
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8080}:8080"
     depends_on:
@@ -162,8 +196,14 @@ services:
       # O front fala apenas com a API Go. SSR usa a rede interna (porta do
       # container); o navegador usa a porta publicada no host.
       NUXT_API_BASE_URL: http://agro-api:8080
+      # Heap do Node abaixo do teto do container (1 GB); o restante é código nativo e buffers.
+      NODE_OPTIONS: --max-old-space-size=768
       NUXT_PUBLIC_API_BASE: http://localhost:${API_HOST_PORT:-8080}
-      NUXT_PUBLIC_API_MOCK: 'true'
+      # Sessão real pelo cookie HttpOnly da API (ADR 0015). O mock só existe em `make dev` (nuxt dev):
+      # NUXT_PUBLIC_API_MOCK=true troca tudo por ele; MOCK_PENDING usa a API real e o mock só onde o contrato é `planned`.
+      NUXT_PUBLIC_API_MOCK: ${NUXT_PUBLIC_API_MOCK:-false}
+      NUXT_PUBLIC_API_MOCK_PENDING: ${NUXT_PUBLIC_API_MOCK_PENDING:-true}
+      NUXT_PUBLIC_ACCOUNT_URL: ${NUXT_PUBLIC_ACCOUNT_URL:-${KEYCLOAK_URL:-http://localhost:8180}/realms/${KEYCLOAK_REALM:-inceres}/account}
     ports:
       - "127.0.0.1:${WEB_HOST_PORT:-3000}:3000"
     depends_on:

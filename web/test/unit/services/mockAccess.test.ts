@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '~/services/errors'
-import { createMockServices } from '~/services/mock/mockServices'
+import { createMockServices, type MockApiServices } from '~/services/mock/mockServices'
 import { TEST_PASSWORD } from '~/services/mock/seed'
-import type { ApiServices } from '~/services/ports'
 import type { FarmInput } from '~/types/farm'
 
 /** Mock services sharing one database, with a switchable signed-in user. */
@@ -11,7 +10,7 @@ function createWorld() {
   const api = createMockServices({ latencyMs: 0, getAccessToken: () => token, now: () => new Date('2026-11-21T12:00:00Z') })
   return {
     api,
-    as(userId: string): ApiServices {
+    as(userId: string): MockApiServices {
       token = `mock-token:${userId}`
       return api
     },
@@ -171,11 +170,12 @@ describe('mock users and invitations', () => {
       companyId: 'company-santa-rita',
       farmScope: { mode: 'selected', farmIds: ['farm-santa-rita'] },
     })
-    expect(invited).toMatchObject({ status: 'invited', company: { name: 'Fazenda Santa Rita' }, lastAccessAt: null })
-    expect((await rejection(admin.users.invite({ ...invited, companyId: 'company-santa-rita' }))).code).toBe('conflict')
+    expect(invited.emailStatus).toBe('sent')
+    expect(invited.user).toMatchObject({ status: 'invited', company: { name: 'Fazenda Santa Rita' }, lastAccessAt: null })
+    expect((await rejection(admin.users.invite({ ...invited.user, companyId: 'company-santa-rita' }))).code).toBe('email_already_registered')
 
-    await admin.users.resendInvitation(invited.invitation!.id)
-    await admin.users.cancelInvitation(invited.invitation!.id)
+    expect(await admin.users.resendInvitation(invited.user.invitation!.id)).toBe('sent')
+    await admin.users.cancelInvitation(invited.user.invitation!.id)
     expect((await admin.users.list()).total).toBe(3)
   })
 
@@ -226,10 +226,10 @@ describe('mock profile', () => {
     const operator = world.as('user-carlos')
     expect((await operator.profile.update({ name: 'Carlos M. Mendes' })).name).toBe('Carlos M. Mendes')
 
-    const wrong = await rejection(operator.profile.changePassword({ currentPassword: 'nope', newPassword: 'curta' }))
+    const wrong = await rejection(operator.auth.changePassword({ currentPassword: 'nope', newPassword: 'curta' }))
     expect(wrong.details.map(detail => detail.field)).toEqual(['current_password', 'new_password'])
 
-    await operator.profile.changePassword({ currentPassword: TEST_PASSWORD, newPassword: 'nova-senha-123' })
+    await operator.auth.changePassword({ currentPassword: TEST_PASSWORD, newPassword: 'nova-senha-123' })
     expect((await operator.profile.get()).passwordChangedAt).toEqual(new Date('2026-11-21T12:00:00Z'))
     const session = await world.api.auth.login({ identifier: 'carlos.mendes@email.test', password: 'nova-senha-123', rememberMe: false })
     expect(session.user.id).toBe('user-carlos')

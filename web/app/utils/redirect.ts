@@ -2,6 +2,8 @@
  * Post-login redirect guard against open redirects: only same-origin paths of
  * this app are accepted; anything else falls back to the default page.
  */
+import type { LoginErrorCode } from './login'
+
 export const DEFAULT_AUTHENTICATED_PATH = '/farms'
 export const LOGIN_PATH = '/login'
 
@@ -32,6 +34,9 @@ export function safeRedirect(target: unknown, fallback: string = DEFAULT_AUTHENT
   }
   if (url.origin !== PROBE_ORIGIN) return fallback
   if (url.pathname === LOGIN_PATH) return fallback
+  // Dot segments ("/.//host", "/a/..//host", "/%2e//host") normalize into "//host",
+  // which a router or browser reads as protocol-relative: validate the result too.
+  if (!url.pathname.startsWith('/') || url.pathname.startsWith('//')) return fallback
   return `${url.pathname}${url.search}${url.hash}`
 }
 
@@ -43,6 +48,8 @@ export interface AuthGuardInput {
   readonly isAuthenticated: boolean
   /** Landing page of the signed-in user (`homePathFor(permissions)`); defaults to /farms. */
   readonly homePath?: string
+  /** Why the session check failed (denied product, API down); null for a plain "not signed in". */
+  readonly loginError?: LoginErrorCode | null
 }
 
 export type AuthGuardTarget = { path: string, query?: Record<string, string> } | null
@@ -50,7 +57,9 @@ export type AuthGuardTarget = { path: string, query?: Record<string, string> } |
 /**
  * Decision of the global auth middleware: `null` lets the navigation through.
  * Public pages are open; a signed-in user on /login goes to the safe redirect;
- * a guest on a private page goes to /login keeping where they wanted to go.
+ * a guest on a private page goes to /login keeping where they wanted to go, with
+ * `error` when the check failed for a reason the user must read (the public
+ * /login never checks again, so this cannot loop).
  */
 export function resolveAuthRedirect(input: AuthGuardInput): AuthGuardTarget {
   if (input.isPublic) {
@@ -59,7 +68,10 @@ export function resolveAuthRedirect(input: AuthGuardInput): AuthGuardTarget {
       : null
   }
   if (input.isAuthenticated) return null
-  return { path: LOGIN_PATH, query: { redirect: input.fullPath } }
+  const query: Record<string, string> = input.loginError
+    ? { error: input.loginError, redirect: input.fullPath }
+    : { redirect: input.fullPath }
+  return { path: LOGIN_PATH, query }
 }
 
 export interface PermissionGuardInput {

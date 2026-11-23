@@ -5,9 +5,16 @@ import type { ActivityView } from '~/utils/dashboard'
  * "Atividade recente" (Figma 54:789): who did what and when. The agent gets
  * the dark avatar with "IA".
  */
-defineProps<{
-  activity: readonly ActivityView[]
-}>()
+withDefaults(
+  defineProps<{
+    activity: readonly ActivityView[]
+    /** Data still loading (nothing to show yet). */
+    pending?: boolean
+    /** Loading failed: never claim the block is empty. */
+    failed?: boolean
+  }>(),
+  { pending: false, failed: false },
+)
 
 const titleId = useId()
 </script>
@@ -15,7 +22,9 @@ const titleId = useId()
 <template>
   <section class="activity" :aria-labelledby="titleId">
     <h2 :id="titleId" class="activity__title text-h4">Atividade recente</h2>
-    <p v-if="activity.length === 0" class="activity__empty text-body-md">Nenhuma atividade recente.</p>
+    <DashboardBlockStatus v-if="activity.length === 0" :pending="pending" :failed="failed">
+      Nenhuma atividade recente.
+    </DashboardBlockStatus>
     <ul v-else class="activity__list">
       <li v-for="entry in activity" :key="entry.id" class="activity__item">
         <BaseAvatar :initials="entry.initials" :seed="entry.actorName" :tone="entry.isAgent ? 'dark' : undefined" />
@@ -81,8 +90,4 @@ const titleId = useId()
   color: var(--color-text-tertiary);
 }
 
-.activity__empty {
-  margin: 0;
-  color: var(--color-text-secondary);
-}
 </style>

@@ -13,17 +13,21 @@ defineProps<{
   userName: string
 }>()
 
+const isOpen = ref(false)
+
 const emit = defineEmits<{
   select: [action: UserRowAction]
 }>()
 </script>
 
 <template>
-  <v-menu v-if="actions.length" location="bottom end">
+  <v-menu v-if="actions.length" v-model="isOpen" location="bottom end">
     <template #activator="{ props: menuProps }">
       <button
         type="button"
         class="user-actions__trigger"
+        aria-haspopup="menu"
+        :aria-expanded="isOpen"
         :aria-label="`Mais opções para ${userName}`"
         :title="`Mais opções para ${userName}`"
         v-bind="menuProps"

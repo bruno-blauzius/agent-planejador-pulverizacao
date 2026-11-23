@@ -12,8 +12,10 @@ export function useUserActions() {
   const invite = useAction((input: InvitationInput) => users.invite(input))
   const update = useAction((userId: string, input: UserUpdateInput) => users.update(userId, input))
   // `true` instead of `void`, so success and failure (`null`) are distinguishable.
-  const resend = useAction(async (invitationId: string) => {
-    await users.resendInvitation(invitationId)
+  // Resolves whether the e-mail left (`X-Invitation-Email`), so the screen can warn honestly.
+  const resend = useAction((invitationId: string) => users.resendInvitation(invitationId))
+  const remove = useAction(async (userId: string) => {
+    await users.remove(userId)
     return true as const
   })
   const cancel = useAction(async (invitationId: string) => {
@@ -30,6 +32,8 @@ export function useUserActions() {
     updateError: update.error,
     resendInvitation: resend.execute,
     resendError: resend.error,
+    remove: remove.execute,
+    removeError: remove.error,
     cancelInvitation: cancel.execute,
     cancelError: cancel.error,
   }

@@ -24,10 +24,17 @@ function setup(auth?: AuthService): NuxtFakes {
 /** Auth service that always rejects with the given error. */
 function failingAuth(error: ApiError): AuthService {
   return {
+    kind: 'password',
     login: async () => {
       throw error
     },
+    changePassword: async () => {
+      throw error
+    },
     getCurrentUser: async () => {
+      throw error
+    },
+    logout: async () => {
       throw error
     },
   }
@@ -67,7 +74,7 @@ describe('useLoginForm', () => {
     const fakes = setup()
     fakes.route.query = { redirect: '//evil.test' }
     const form = useLoginForm()
-    form.identifier.value = '123.278.916-05'
+    form.identifier.value = SEED_USER_EMAIL
     form.password.value = SEED_USER_PASSWORD
 
     await form.submit()
@@ -106,15 +113,15 @@ describe('useLoginForm', () => {
       code: 'validation_failed',
       message: 'dados inválidos',
       status: 422,
-      details: [{ field: 'identifier', message: 'CPF inválido' }],
+      details: [{ field: 'identifier', message: 'e-mail inválido' }],
     })))
     const form = useLoginForm()
-    form.identifier.value = '111.111.111-11'
+    form.identifier.value = 'ninguem@x.test'
     form.password.value = 'x'
 
     await form.submit()
 
-    expect(form.fieldErrors.value).toEqual({ identifier: 'CPF inválido' })
+    expect(form.fieldErrors.value).toEqual({ identifier: 'e-mail inválido' })
     expect(form.formError.value).toBeNull()
   })
 

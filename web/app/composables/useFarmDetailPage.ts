@@ -77,9 +77,15 @@ export interface FarmDetailPage {
   /** Error of the farm, else of the fields. */
   readonly error: ComputedRef<ApiError | null>
   readonly isNotFound: ComputedRef<boolean>
+  /** 403 (`forbidden` or `out_of_scope`): the farm is outside the session's permission or farm scope. */
+  readonly isForbidden: ComputedRef<boolean>
   /** Farm loaded without any field. */
   readonly isEmpty: ComputedRef<boolean>
   readonly refresh: () => Promise<void>
+}
+
+function isForbiddenCode(code: ApiError['code'] | undefined): boolean {
+  return code === 'forbidden' || code === 'out_of_scope'
 }
 
 /** Screen "Fazenda · Áreas e talhões" (Figma 15:126). */
@@ -186,6 +192,7 @@ export function useFarmDetailPage(farmId: MaybeRefOrGetter<string>, options: { n
     pending,
     error,
     isNotFound: computed(() => farmError.value?.code === 'not_found'),
+    isForbidden: computed(() => isForbiddenCode(farmError.value?.code) || isForbiddenCode(fieldsResource.error.value?.code)),
     isEmpty: computed(() => !pending.value && !error.value && fields.value.length === 0),
     refresh: async () => {
       await Promise.all([farmResource.refresh(), fieldsResource.refresh()])

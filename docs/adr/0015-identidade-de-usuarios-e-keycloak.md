@@ -1,6 +1,6 @@
 # ADR 0015: Identidade de usuários, SSO Inceres (Keycloak) e vínculo com a empresa
 
-- **Status:** aceito (2026-11-21). **Implementação em andamento:** o Keycloak compartilhado e o banco dedicado dele rodam no projeto `infra-docker` (D1 e D8), e a **parte do produto no realm `inceres` está criada e verificada** (clients `agentes-agro` e `agentes-agro-provisioner`, 8 permissões, 3 papéis compostos e os grupos `/agentes-agro/...`; ver `infra/keycloak/`). O restante da Fase A (código da API, migrações a partir do DER) ainda não foi iniciado.
+- **Status:** aceito (2026-11-21). **Implementação em andamento:** o Keycloak compartilhado e o banco dedicado dele rodam no projeto `infra-docker` (D1 e D8), e a **parte do produto no realm `inceres` está criada e verificada** (clients `agentes-agro` e `agentes-agro-provisioner`, 8 permissões, 3 papéis compostos e os grupos `/agentes-agro/...`; ver `infra/keycloak/`). Em 2026-11-22 a infraestrutura foi endurecida (revogação de privilégios por grupo e papel, mapper e *client scopes* exatos, baseline de atributos, checagem do realm, auditoria, seed e verificação de tokens; ver o passo 5) sem mudar nenhuma decisão. Em 2026-11-22 o **contrato `openapi.yaml` da Fase A foi concluído** (passo 6; D9). O restante da Fase A (código da API, migrações a partir do DER) ainda não foi iniciado.
 - **Data:** 2026-11-21
 - **Histórico:** revisão 2 trouxe o realm `inceres` compartilhado e o client `agentes-agro`. A revisão 3 registra as respostas às perguntas: grupos por papel, **permissões no Keycloak**, logout **só do produto**, remoção do login por CPF, **telas inalteradas nesta entrega** e **sem Mailpit**. Aceito em 2026-11-21, com a decisão adicional de que o **Keycloak e o banco dele ficam no projeto `infra-docker`, compartilhados entre os produtos** (não no compose deste repositório).
 - **Complementa e ajusta:** ADR 0013 (empresas, papéis e permissões). A **origem do papel e das permissões** passa para o Keycloak (D3); empresa, escopo de fazendas e status no produto continuam da API, que segue aplicando a autorização em cada requisição. Fecha a pendência "fluxo de aceite de convite e definição de senha" do 0013 e o adendo "cookie do token de acesso" do 0010, que pedia ADR próprio.
@@ -168,7 +168,7 @@ A API também aceita `Authorization: Bearer` com JWT do realm, validado pela bib
 
 ### D7. Convite e primeiro acesso
 
-- **Conta nova:** o convite cria a conta no realm com as ações obrigatórias `VERIFY_EMAIL` e `UPDATE_PASSWORD`. Com SMTP configurado no realm, o e-mail é enviado, e isso resolve a pendência do ADR 0013 **sem página nossa e sem tocar em senha**.
+- **Conta nova:** o convite cria a conta no realm com as ações obrigatórias `VERIFY_EMAIL` e `UPDATE_PASSWORD`. Com SMTP configurado no realm, o e-mail é enviado, e isso resolve a pendência do ADR 0013 **sem página nossa e sem tocar em senha**. O link do e-mail termina em `GET /auth/login` (sem `return_to`, ou seja, para o início da aplicação), registrado como segundo `redirect_uri` exato do client: `/auth/callback` sozinho não tem `code` nem `state` e responderia `422`.
 - **Conta já existente no realm** (de outro produto): não há e-mail de senha; o usuário é adicionado ao grupo e, ao entrar, cai direto no produto (D4).
 - O primeiro login bem-sucedido de um usuário `invited` (com `email_verified = true` e papel presente) muda `status` para `active`, preenche `invitations.accepted_at` e grava auditoria.
 - Reenviar renova `expires_at` e o link; cancelar marca `cancelled_at`, remove o usuário do grupo do produto e some da lista. A conta do realm só é apagada se foi criada por este convite e nunca foi usada (regra 2 da D5).
@@ -278,7 +278,7 @@ sequenceDiagram
 
 - **Validação de token:** assinatura, `iss`, `aud`/`azp`, `exp` e `nbf` com tolerância pequena de relógio; apenas algoritmos assimétricos; chaves do realm com cache e rotação pela biblioteca; ID token nunca aceito como access token. Em realm compartilhado, **aceitar token de outro client do realm é falha grave**: a checagem de audiência é obrigatória.
 - **Permissões vêm do token, então o token é a autoridade:** só se confia em claim de token validado. Os nomes de papel e permissão são os do produto; qualquer outro é ignorado.
-- **Cookie de sessão:** valor aleatório de 256 bits, só o hash no banco, `HttpOnly`, `Secure` fora do ambiente local, `SameSite=Lax`, rotação no login e revogação no logout.
+- **Cookie de sessão:** valor aleatório de 256 bits, só o hash no banco, `HttpOnly`, `Secure` sempre (navegadores tratam `http://localhost` como contexto seguro, exceto o Safari), `SameSite=Lax`, rotação no login e revogação no logout.
 - **Dados sensíveis:** refresh token só cifrado; token, senha e documento nunca em log nem em `audit_events.metadata`.
 - **Mínimo privilégio:** `agentes-agro-provisioner` sem acesso a configuração do realm (D5, regra 3); console de administração do Keycloak não exposto publicamente em produção.
 - **Auditoria:** convite, reenvio, cancelamento, mudança de papel e escopo, ativação, desativação, vínculo de conta existente e papel ambíguo geram `audit_events`.
@@ -332,8 +332,17 @@ De dentro para fora, como pede o CLAUDE.md. **Fase A: backend, sem tocar o front
 2. `usecase`: portas (D5) e casos de uso (convidar, reenviar, cancelar, mudar papel, desativar, resolver principal, `GET /auth/me`), com fakes e teste de isolamento entre empresas.
 3. Migrações (golang-migrate) e repositórios (pgx + sqlc) conforme o [DER](../arquitetura/der-api.md), com teste de integração em banco descartável.
 4. `adapter/oidc` (callback, sessão, Bearer, renovação, revogação, *back-channel logout*) e `adapter/keycloak` (Admin REST).
-5. **Parte do produto no realm `inceres`: feito** (`infra/keycloak/`, aplicada com `make keycloak` e verificada de ponta a ponta). Falta o script de seed de usuários de teste e os nomes de variáveis que a API vai ler (URL do emissor e URL interna, segredos dos clients), que já constam no `.env.example`.
-6. Contrato `openapi.yaml` (D9, Fase A) e **teste de contrato entre o `openapi.yaml` e o realm**. O mock e as telas **não** mudam.
+5. **Parte do produto no realm `inceres`: feito** (`infra/keycloak/`, aplicada com `make keycloak` e verificada de ponta a ponta). Entregue também:
+   - **Seed de desenvolvimento** (`make keycloak-seed`): 3 usuários, um por papel, com nome, `emailVerified` e subgrupo; senhas em `KEYCLOAK_SEED_PASSWORD_*` no `.env`; só `localhost`; `--cleanup` remove só o que ele criou.
+   - **Verificação** (`make keycloak-verify`): o token de exemplo de cada usuário seed traz exatamente as roles da tabela do `openapi.yaml`, `aud` e `azp` do client, e nenhum `realm_access` nem role de outro client; usuário sem grupo não recebe role do produto.
+   - **Endurecimento:** grupos e papéis do produto só podem conter o que o JSON declara (um `realm-admin` acrescentado à mão é revogado); o claim do produto sai de um *mapper* explícito, e os *client scopes* dos dois clients são exatos; atributos de segurança dos clients têm baseline (sem device grant, CIBA, *token exchange* nem PAR); `--check` confere os pré-requisitos do realm (somente leitura) e `make keycloak-audit` lista quem está em cada papel.
+   - **Variáveis do `.env.example`:** as do script (`KEYCLOAK_URL`, `KEYCLOAK_REALM`, admin, segredos dos clients, `AGENTES_AGRO_API_URL`, `AGENTES_AGRO_API_INTERNAL_URL`, `AGENTES_AGRO_WEB_URL`, `KEYCLOAK_SEED_PASSWORD_*`). **Falta** definir os nomes que a **API** vai ler (URL do emissor, URL interna, segredos dos clients), junto do `adapter/oidc` (passo 4); este passo não os definiu antes, ao contrário do que o texto anterior afirmava.
+6. **Contrato `openapi.yaml` (D9, Fase A): feito** e **teste de contrato entre o `openapi.yaml` e o realm** (já existia, `make keycloak-test`). O mock e as telas **não** mudaram. Entregue no contrato (todos `x-status: planned`):
+   - `GET /auth/login` (`return_to` só caminho relativo; `302` ao Keycloak com PKCE S256, `state`, `nonce`; `prompt=login` após logout), `GET /auth/callback` (`302` com cookie `agro_session`; `403` `user_not_provisioned`, `no_access_to_product`, `ambiguous_role`; `502`), `POST /auth/logout` (CSRF por `Origin`) e `POST /auth/backchannel-logout` (cliente: Keycloak; form `logout_token`);
+   - `POST /auth/login` e `POST /me/password` `deprecated` (só mock; `identifier` só e-mail; `Profile.password_changed_at` `deprecated`);
+   - `GET /auth/me` aceita cookie **ou** Bearer, com os novos `403`; `securitySchemes` com `sessionCookie` (apiKey in cookie `agro_session`), `bearerAuth` e `openIdConnect`; endpoints de negócio aceitam cookie **ou** Bearer;
+   - códigos de erro novos no enum de `Error`: `user_not_provisioned`, `no_access_to_product`, `ambiguous_role`, `identity_provider_unavailable`;
+   - usuários e convites: formato igual, com `502 identity_provider_unavailable` e o cabeçalho opcional `X-Invitation-Email` (`sent`, `not_sent`, `not_needed`) em `POST /invitations` e no reenvio, para a resposta honesta quando o e-mail não saiu.
 7. Comando `bootstrap` e roteiro de produção (aplicação declarativa no realm compartilhado).
 
 **Fase B: front** (fase própria, com a sua confirmação): login pelo Keycloak com tema do client, troca de senha por redirecionamento, remoção de `useAuthToken`, limpeza dos `deprecated`.
@@ -344,8 +353,29 @@ Decididas na revisão 3: grupos por papel; permissões como *client roles* no Ke
 
 1. **Operação do Keycloak compartilhado em produção:** em desenvolvimento ele já roda no `infra-docker`, e o produto aplica a sua parte por script sobre a Admin API (`make keycloak`). Falta definir quem opera o realm fora da máquina local, se esse script serve em produção ou se entra Terraform ou *kcadm*, e se o FGAP v2 está disponível para restringir o provisionador aos grupos do produto. Define o ADR de infraestrutura.
 2. **Quando fazer a Fase B** (front), já que sem ela o front não autentica na API real.
-3. **Rotação de refresh token no realm:** `revokeRefreshToken` está **desligado** no `inceres`. O desenho da sessão (D6) a assume; ligar é decisão da plataforma, porque vale para todos os produtos.
+3. **Rotação de refresh token no realm:** `revokeRefreshToken` está **desligado** no `inceres`. O desenho da sessão (D6) a assume; ligar é decisão da plataforma, porque vale para todos os produtos. O `--check` avisa enquanto estiver desligado.
+4. **Pedidos à plataforma** (senha mais forte, retenção de eventos, SMTP, tempos de vida, produção, backup, MFA para administradores, entre outros): reunidos, com valor e motivo, em [`infra/keycloak/PLATFORM-REQUESTS.md`](../../infra/keycloak/PLATFORM-REQUESTS.md). Alguns são decisão do usuário.
 
 ## Aceite
 
 Aceito em 2026-11-21, com as respostas registradas na revisão 3 e a decisão de hospedar o Keycloak e o banco dele no projeto `infra-docker`. A Fase A segue o plano acima; a Fase B (front) só começa com a confirmação das telas. O [DER](../arquitetura/der-api.md) passa a ser a base das migrações.
+
+## Fase B: front (implementada em 2026-11-22)
+
+Autorizada pelo usuário, como previsto na D9. O front passa a usar a API real para sessão, usuários, convites, empresas e perfil; o mock continua para dev sem API e para os endpoints ainda `planned` (ADR 0010, adendo de 2026-11-22).
+
+- **Login:** a tela `/login` não tem senha na API real. O botão é um link para `{apiBase}/auth/login?return_to=<rota>` (a rota vem de `?redirect=`, validada por `safeRedirect`; sem ela, `/`). O formulário de e-mail e senha (rótulo agora só "E-mail", sem CPF) existe apenas no mock. "Esqueci minha senha" e "Manter conectado" saem da tela real: ficam na página do Keycloak.
+- **Sessão:** cookie `HttpOnly` `agro_session`, invisível ao JavaScript. O cliente HTTP usa `credentials: 'include'`; no SSR repassa o `cookie` da requisição à API (`useRequestHeaders`). `useAuthToken` e o cabeçalho `Authorization` saem do caminho real. O middleware restaura o usuário com `GET /auth/me` (uma vez por carga); um 401 em qualquer chamada de página esquece o usuário e volta ao login com a rota de origem.
+- **Erros de acesso:** 401 vai ao login. 403 `user_not_provisioned`, `no_access_to_product`, `ambiguous_role` ou `forbidden` (usuário ou empresa inativos) vai a `/login?error=<código>` com mensagem clara; falha da própria API vai a `?error=unavailable`. `/login` nunca consulta `/auth/me` quando traz `?error=`, e o login só começa por clique, então não há laço.
+- **Logout:** `POST /auth/logout` (o navegador envia `Origin`, exigido pela API) e só depois o estado local é limpo; se o servidor recusar, a sessão continua e o erro aparece. O próximo login usa `prompt=login` (a API cuida disso).
+- **Senha:** o Perfil não troca mais senha na API real; a seção aponta para a conta do Keycloak (`NUXT_PUBLIC_ACCOUNT_URL`, padrão `<KEYCLOAK_URL>/realms/<realm>/account`). `POST /auth/login` e `POST /me/password` não são chamados.
+- **Convites:** o cabeçalho `X-Invitation-Email` (`sent`, `not_sent`, `not_needed`) vira aviso honesto: `not_sent` e cabeçalho ilegível são avisos ("convite criado, mas o e-mail não foi enviado"), nunca sucesso.
+- **Cookies entre portas:** `localhost:3000` e `localhost:8002` são o mesmo site (cookies ignoram a porta), então `SameSite=Lax` basta; o CORS da API (`API_CORS_ALLOWED_ORIGINS`, com credenciais) cobre a leitura da resposta. `127.0.0.1` é outro site: abra o front por `localhost`. `Secure` em `http://localhost` funciona no Chrome e no Firefox; o Safari não grava cookie `Secure` em HTTP.
+
+**Lacunas encontradas (pedem ajuste na API, fora do front):**
+1. `GET /auth/callback` responde `Location: <return_to>` relativo, que o navegador resolve contra o host da **API**, não do front, quando os dois têm portas ou hosts diferentes. Em produção (mesmo host, ADR acima) funciona; em dev o usuário cai em `localhost:8002/<rota>`. Correção sugerida: a API monta o redirecionamento absoluto com `AGENTES_AGRO_WEB_URL` (já existe no compose e no script do Keycloak).
+2. As falhas do callback (403, 422, 502) respondem JSON no host da API: o usuário vê JSON cru. Sugestão: redirecionar para `<web>/login?error=<código>`; a tela já entende `user_not_provisioned`, `no_access_to_product`, `ambiguous_role`, `forbidden` e `identity_provider_unavailable`.
+3. `Access-Control-Expose-Headers` lista só `X-Request-Id`: o navegador não lê `X-Invitation-Email` entre origens. O front trata como "não foi possível confirmar o envio". Correção: expor `X-Invitation-Email`.
+**Resolvidas na API (lacunas 1 a 3):** o `GET /auth/callback` redireciona para a URL absoluta do front (`AGENTES_AGRO_WEB_URL` + `return_to` validado; sem a variável, segue relativo) e, em falha, para `<web>/login?error=<código>` (`user_not_provisioned`, `no_access_to_product`, `ambiguous_role`, `forbidden`, `identity_provider_unavailable`; login inválido, expirado ou falha interna viram `unavailable`, sem detalhes), sem criar sessão. `X-Invitation-Email` passou a constar em `Access-Control-Expose-Headers`.
+
+4. O tema de login do client `agentes-agro` e a remoção dos `deprecated` (`POST /auth/login`, `POST /me/password`, `password_changed_at`) do contrato seguem pendentes: o mock ainda os usa, então saem junto com `services/mock/`.

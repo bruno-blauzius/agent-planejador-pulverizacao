@@ -14,7 +14,7 @@ tags:
   - name: Docs
     description: Contrato e documentação interativa. Disponíveis apenas quando `API_DOCS_ENABLED=true`.
   - name: Auth
-    description: Autenticação do usuário do front. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+    description: Login e sessão pelo SSO Inceres (Keycloak), com a API como cliente OIDC (ADR 0015). **Implementado**, exceto o `POST /auth/login` do mock, obsoleto e ainda marcado com `x-status` = planned (ver ADR 0010).
   - name: Farms
     description: Cadastro de fazendas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
   - name: Fields
@@ -24,13 +24,15 @@ tags:
   - name: Crops
     description: Catálogo de culturas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
   - name: Users
-    description: Usuários, papéis e convites (ADR 0013). **Ainda não implementado** (planned).
+    description: Usuários, papéis, convites, inativação e exclusão lógica (ADR 0013 e 0015). **Implementado**.
   - name: Companies
-    description: Empresas clientes, gestão do super admin (ADR 0013). **Ainda não implementado** (planned).
+    description: Empresas clientes, gestão do super admin (ADR 0013). **Implementado**.
   - name: Profile
-    description: Perfil do usuário autenticado (ADR 0013). **Ainda não implementado** (planned).
+    description: Perfil do usuário autenticado (ADR 0013). **Implementado**, exceto `POST /me/password` (obsoleto, só mock).
   - name: Dashboard
     description: Painel do administrador (ADR 0013). **Ainda não implementado** (planned).
+  - name: Planner
+    description: Planejador de pulverização, confirmação humana e visão do operador (ADR 0016). **Ainda não implementado** (planned).
 paths:
   /health/live:
     get:
@@ -154,16 +156,54 @@ paths:
   # no Go; o front usa uma implementação em memória até lá.
   # ---------------------------------------------------------------------------
   /auth/login:
+    get:
+      tags: [Auth]
+      operationId: startLogin
+      x-status: implemented
+      summary: Inicia o login pelo SSO Inceres (Keycloak)
+      description: |
+        ADR 0015, D6. A API é o cliente OIDC confidencial `agentes-agro` (padrão BFF).
+        Valida `return_to` e responde `302` para o Keycloak (realm `inceres`) com *Authorization Code*,
+        PKCE S256, `state` e `nonce`. Quem já tem sessão de SSO (por outro produto) entra sem digitar a senha.
+        Logo após um `POST /auth/logout` do produto, o redirecionamento leva `prompt=login`, para exigir
+        reautenticação só aqui, já que a sessão de SSO continua aberta.
+      security: []
+      parameters:
+        - name: return_to
+          in: query
+          description: |
+            Caminho relativo para onde voltar após o login (ex.: `/farms`). Só é aceito caminho relativo à própria
+            aplicação (começa com uma única `/`; sem esquema, host, `//` nem barra invertida); qualquer outro valor
+            é rejeitado com `422`, contra *open redirect*. Ausente: `/`.
+          schema:
+            type: string
+            examples: [/farms]
+      responses:
+        "302":
+          description: Redirecionamento para o endpoint de autorização do Keycloak.
+          headers:
+            Location:
+              description: URL do Keycloak com `client_id`, `redirect_uri` (`/auth/callback`), `code_challenge` (S256), `state` e `nonce`.
+              schema:
+                type: string
+                format: uri
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
     post:
       tags: [Auth]
       operationId: login
       x-status: planned
-      summary: Autentica com e-mail ou CPF e senha
+      deprecated: true
+      summary: "[Obsoleto] Autentica com e-mail e senha (somente mock)"
       description: |
-        Ainda não implementado. Troca credenciais por um token de acesso Bearer.
-        `identifier` aceita e-mail ou CPF (com ou sem máscara). Com `remember_me: true`
-        ("Manter conectado") a API devolve um `expires_at` mais longo; o front alinha a
-        validade do cookie a esse valor.
+        **Obsoleto e nunca será implementado no Go** (ADR 0015, D9). A API não vê nem guarda senha: a autenticação
+        é do Keycloak (`GET /auth/login`). Este endpoint existe só para o mock do front (ADR 0010) até a Fase B,
+        quando sai do contrato. Troca credenciais por um token Bearer. `identifier` é o e-mail; o login por CPF
+        saiu do contrato. Com `remember_me: true` ("Manter conectado") o mock devolve um `expires_at` mais longo.
       security: []
       requestBody:
         required: true
@@ -184,15 +224,153 @@ paths:
           $ref: "#/components/responses/ValidationFailed"
         "500":
           $ref: "#/components/responses/InternalError"
+  /auth/callback:
+    get:
+      tags: [Auth]
+      operationId: finishLogin
+      x-status: implemented
+      summary: Conclui o login (retorno do Keycloak)
+      description: |
+        ADR 0015, D6. Redirecionamento de volta do Keycloak. A API confere `state`,
+        troca o `code` (cliente confidencial, PKCE), valida o ID token e o access token (assinatura, `iss`, `exp`,
+        `nonce`, `aud`/`azp` = `agentes-agro`), resolve `(iss, sub)` em `user_identities`, lê papel e permissões de
+        `resource_access.agentes-agro.roles`, confere que o usuário está `active` (um `invited` com e-mail verificado
+        passa a `active`) e cria a sessão. Responde `302` para o `return_to` validado, com o cookie de sessão
+        `agro_session` (`HttpOnly`, `Secure` sempre, `SameSite=Lax`, valor opaco).
+
+        É navegação do navegador, então o redirecionamento é para a URL **absoluta do front**: a base fixa vem da
+        configuração `AGENTES_AGRO_WEB_URL` e o `return_to` validado (nunca uma URL vinda do usuário) é concatenado a ela.
+        Sem a configuração, o `Location` fica relativo (front e API no mesmo host).
+
+        **Falhas também são `302`**, para `<front>/login?error=<código>`, nunca JSON, e nunca criam sessão (o cookie
+        de fluxo é descartado em qualquer desfecho). Códigos: `user_not_provisioned`, `no_access_to_product`,
+        `ambiguous_role`, `forbidden` (usuário ou empresa inativos), `identity_provider_unavailable` (Keycloak fora do ar)
+        e `unavailable` (login inválido ou expirado, `state` divergente, cancelamento no Keycloak ou falha interna;
+        sem detalhes). Os `403`, `422` e `502` abaixo descrevem a mesma classificação, que vira o código do redirecionamento.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          description: Código de autorização emitido pelo Keycloak.
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          description: Valor de correlação gerado em `GET /auth/login`; divergência é rejeitada.
+          schema:
+            type: string
+      responses:
+        "302":
+          description: |
+            Sessão criada e segue para o `return_to`; ou falha e segue para `/login?error=<código>` do front
+            (sem `Set-Cookie` de sessão).
+          headers:
+            Location:
+              description: |
+                `<AGENTES_AGRO_WEB_URL><return_to>` em caso de sucesso (caminho validado em `GET /auth/login`) ou
+                `<AGENTES_AGRO_WEB_URL>/login?error=<código>` em caso de falha. Relativo se a URL do front não estiver configurada.
+              schema:
+                type: string
+            Set-Cookie:
+              description: Cookie de sessão `agro_session` (`HttpOnly; Secure; SameSite=Lax; Path=/`), com valor opaco e aleatório.
+              schema:
+                type: string
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+        "403":
+          $ref: "#/components/responses/ProductAccessDenied"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "502":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      x-status: implemented
+      summary: Encerra a sessão do produto
+      description: |
+        ADR 0015, D6, item 7. Revoga a sessão local e o refresh token no Keycloak
+        (endpoint de revogação do OAuth) e apaga o cookie. **Não encerra a sessão de SSO**: os outros produtos
+        continuam logados, e por isso o próximo `GET /auth/login` usa `prompt=login`. Idempotente: sem sessão
+        válida também responde `204`. Como é escrita por cookie, exige proteção CSRF: o `Origin` (ou, quando o
+        navegador não envia `Origin`, a origem do `Referer`) precisa estar na lista de origens permitidas (CORS).
+        Sem nenhum dos dois, ou com uma origem não permitida, responde `403 forbidden`, mesmo sem sessão.
+      security:
+        - sessionCookie: []
+      responses:
+        "204":
+          description: Sessão encerrada.
+          headers:
+            Set-Cookie:
+              description: Cookie `agro_session` apagado (`Max-Age=0`).
+              schema:
+                type: string
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /auth/backchannel-logout:
+    post:
+      tags: [Auth]
+      operationId: backchannelLogout
+      x-status: implemented
+      summary: Back-channel logout (chamado pelo Keycloak)
+      description: |
+        ADR 0015, D6, item 5. **Cliente: o Keycloak, não o front.** Sem cookie nem Bearer;
+        a autenticidade vem do `logout_token` (JWT assinado pelo realm: assinatura, `iss`, `aud` = `agentes-agro`,
+        evento de back-channel logout, ausência de `nonce`). A API revoga as `auth_sessions` do `sid` (ou do `sub`)
+        informado. Não exige `Origin`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [logout_token]
+              properties:
+                logout_token:
+                  type: string
+                  description: JWT de logout emitido pelo Keycloak.
+      responses:
+        "200":
+          description: Sessões revogadas (também quando o `sid` não tem sessão neste produto).
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/CacheControlNoStore"
+        "400":
+          description: "`logout_token` ausente ou inválido (OIDC Back-Channel Logout). Corpo `Error` com `validation_failed`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: validation_failed
+                  message: logout_token inválido
+        "500":
+          $ref: "#/components/responses/InternalError"
   /auth/me:
     get:
       tags: [Auth]
       operationId: getCurrentUser
-      x-status: planned
+      x-status: implemented
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Usuário autenticado
-      description: Ainda não implementado. Devolve o usuário dono do token enviado.
+      description: |
+        Devolve o usuário dono da sessão (cookie `agro_session`) **ou** do token Bearer
+        (JWT do realm `inceres`, audiência `agentes-agro`). O usuário tem **exatamente um** papel do produto, lido
+        do claim `resource_access.agentes-agro.roles`; `permissions` é a **interseção** desse claim com o enum
+        `Permission` (nomes desconhecidos são ignorados). Empresa, escopo de fazendas e status são da API, e o
+        acesso exige usuário `active` em empresa não `inactive`, verificado a cada requisição. Falhas de acesso ao
+        produto respondem `403` com `user_not_provisioned`, `no_access_to_product` ou `ambiguous_role`.
       responses:
         "200":
           description: Usuário autenticado.
@@ -202,6 +380,8 @@ paths:
                 $ref: "#/components/schemas/User"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/ProductAccessDenied"
         "500":
           $ref: "#/components/responses/InternalError"
   /farms:
@@ -210,6 +390,7 @@ paths:
       operationId: listFarms
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Lista fazendas
       description: Ainda não implementado. Lista paginada de fazendas visíveis ao usuário.
@@ -245,6 +426,7 @@ paths:
       operationId: createFarm
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Cadastra fazenda
       description: |
@@ -278,6 +460,7 @@ paths:
       operationId: getFarm
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Detalhe da fazenda
       description: Ainda não implementado.
@@ -299,6 +482,7 @@ paths:
       operationId: updateFarm
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Atualiza fazenda
       description: Ainda não implementado. Substitui os dados editáveis da fazenda (mesmas regras do cadastro).
@@ -329,6 +513,7 @@ paths:
       operationId: importFarmPerimeter
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Importa perímetro de arquivo
       description: |
@@ -372,6 +557,7 @@ paths:
       operationId: listFarmFields
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Lista talhões da fazenda
       description: Ainda não implementado. Todos os talhões da fazenda, com o bloco (área) de cada um.
@@ -399,6 +585,7 @@ paths:
       operationId: createField
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Cadastra talhão
       description: Ainda não implementado. A área em hectares é calculada pela API a partir do polígono.
@@ -432,6 +619,7 @@ paths:
       operationId: updateField
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Atualiza talhão
       description: >-
@@ -464,6 +652,7 @@ paths:
       operationId: listCrops
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Catálogo de culturas
       description: Ainda não implementado. Culturas disponíveis para o cadastro de talhões.
@@ -490,6 +679,7 @@ paths:
       operationId: listOwners
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Lista proprietários
       description: Ainda não implementado. Lista paginada com os vínculos resumidos de cada proprietário.
@@ -521,6 +711,7 @@ paths:
       operationId: createOwner
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Cadastra proprietário
       description: Ainda não implementado. A API valida o CPF/CNPJ (dígitos verificadores) e rejeita duplicados com 409.
@@ -553,6 +744,7 @@ paths:
       operationId: getOwner
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Detalhe do proprietário
       description: Ainda não implementado.
@@ -574,6 +766,7 @@ paths:
       operationId: updateOwner
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Atualiza proprietário
       description: Ainda não implementado.
@@ -608,6 +801,7 @@ paths:
       operationId: getOwnerLinks
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Vínculos do proprietário com fazendas
       description: Ainda não implementado.
@@ -629,6 +823,7 @@ paths:
       operationId: replaceOwnerLinks
       x-status: planned
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Substitui os vínculos do proprietário
       description: |
@@ -668,13 +863,14 @@ paths:
     get:
       tags: [Users]
       operationId: listUsers
-      x-status: planned
+      x-status: implemented
       x-permission: users.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Lista usuários e convites pendentes
       description: |
-        Ainda não implementado. Usuários e convites pendentes (`status: invited`) visíveis ao chamador.
+        Usuários e convites pendentes (`status: invited`) visíveis ao chamador.
         Administrador vê só a própria empresa; super admin (`users.manage_all`) vê todas e pode filtrar por `company_id`.
       parameters:
         - name: search
@@ -714,12 +910,21 @@ paths:
     get:
       tags: [Users]
       operationId: getUsersSummary
-      x-status: planned
+      x-status: implemented
       x-permission: users.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Contagem de usuários por papel
-      description: Ainda não implementado. Mesmo escopo de `GET /users` (cartões de papel da tela Usuários).
+      description: |
+        Mesmo escopo de `GET /users` (cartões de papel da tela Usuários). `company_id`
+        só vale para super admin; para os demais é sempre a própria empresa.
+      parameters:
+        - name: company_id
+          in: query
+          description: Só super admin; para os demais é sempre a própria empresa.
+          schema:
+            type: string
       responses:
         "200":
           description: Resumo.
@@ -740,17 +945,57 @@ paths:
         required: true
         schema:
           type: string
+    get:
+      tags: [Users]
+      operationId: getUser
+      x-status: implemented
+      x-permission: users.manage
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Detalha um usuário ou convite pendente
+      description: |
+        Mesmo escopo de `GET /users`: administrador só enxerga usuários da própria empresa;
+        usuário de outra empresa (ou excluído) responde `404`, nunca `403`, para não revelar que existe.
+      responses:
+        "200":
+          description: Usuário.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccount"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       tags: [Users]
       operationId: updateUser
-      x-status: planned
+      x-status: implemented
       x-permission: users.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Altera papel, empresa, escopo ou status
       description: |
-        Ainda não implementado. Administrador só altera usuários da própria empresa, não atribui `super_admin`
-        e não troca a empresa (403 `forbidden`). Usuário de outra empresa responde 404.
+        Administrador só altera usuários da própria empresa, não atribui `super_admin`
+        e não troca a empresa (403 `forbidden`). Usuário de outra empresa responde 404. Ninguém altera o próprio
+        papel, a própria empresa nem desativa a própria conta (403 `forbidden`). `super_admin` só existe na
+        empresa operadora da plataforma (422 em `role`). `farm_scope`
+        `selected` só vale para `planning_operator` (422 em `farm_scope`) e as fazendas precisam ser da empresa.
+        `name` altera o nome de exibição (dono: a API). `status: active` reativa um usuário `inactive`
+        (volta ao grupo do papel no Keycloak); `status` em convite pendente responde 422 (reenvie ou cancele
+        o convite). Reativar em empresa `inactive` responde `409 company_inactive`. Mudar o papel, desativar ou excluir o último
+        super admin ativo responde `409 last_super_admin`.
+
+        Papel e status passam pelo provisionador (ADR 0015, D5): mudar o papel move o usuário de subgrupo no Keycloak
+        e marca as sessões dele para renovar o token; desativar (`status: inactive`) corta o acesso na hora no banco,
+        revoga as sessões e remove o usuário do grupo do produto, **sem desabilitar a conta do realm** (outros produtos
+        seguem). Falha do provedor responde `502 identity_provider_unavailable`, sem registro pela metade.
       requestBody:
         required: true
         content:
@@ -770,22 +1015,73 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationFailed"
+        "502":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Users]
+      operationId: deleteUser
+      x-status: implemented
+      x-permission: users.manage
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Exclui o usuário do produto
+      description: |
+        **Exclusão lógica (soft delete) no produto** (ADR 0015, D5): marca o usuário como
+        excluído no banco (some das listagens e responde `404`; o e-mail fica livre para novo convite), revoga as
+        sessões, remove o usuário do grupo do papel no Keycloak e encerra as sessões do client `agentes-agro`.
+        **Nunca apaga nem desabilita a conta do realm**: ela segue valendo para os outros produtos. A auditoria
+        do usuário é preservada. Mesmas restrições de empresa e papel de `PATCH /users/{userId}`; ninguém exclui
+        a si mesmo (403 `forbidden`) nem o último super admin ativo (409 `last_super_admin`). Convite pendente deve ser cancelado por `DELETE /invitations/{invitationId}`
+        (409 `invitation_pending`). Ordem: o banco desativa o usuário primeiro (o acesso é cortado na hora), depois o
+        provedor é limpo e só então o usuário é marcado como excluído e o vínculo com a conta é desfeito. Se o
+        provedor falhar, responde `502 identity_provider_unavailable`, o usuário fica `inactive` (sem acesso) e
+        repetir a chamada conclui a exclusão.
+      responses:
+        "204":
+          description: Usuário excluído do produto.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
         "500":
           $ref: "#/components/responses/InternalError"
   /invitations:
     post:
       tags: [Users]
       operationId: createInvitation
-      x-status: planned
+      x-status: implemented
       x-permission: users.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Convida um usuário por e-mail
       description: |
-        Ainda não implementado. Envia o e-mail para a pessoa criar a senha e devolve a linha do usuário
-        com `status: invited`. Mesmas restrições de papel/empresa de `PATCH /users/{userId}`. E-mail já usado responde 409.
+        Envia o e-mail para a pessoa criar a senha e devolve a linha do usuário
+        com `status: invited`. Mesmas restrições de papel/empresa de `PATCH /users/{userId}`. A empresa do convite
+        nunca vem do cliente para o administrador: ele só convida para a própria (403 `forbidden` se divergir).
+        E-mail já usado no produto responde `409 email_already_registered`; empresa `inactive` responde
+        `409 company_inactive`; conta existente no realm com e-mail **não verificado** não é vinculada e responde
+        `409 email_not_verified` (o provisionador reenvia a verificação). Conta existente com e-mail verificado é
+        reaproveitada e o vínculo vai para a auditoria.
+
+        O convite passa pelo provisionador (ADR 0015, D5 e D7): reaproveita a conta do realm quando o e-mail já existe
+        (de outro produto, com e-mail verificado) ou cria uma nova com `VERIFY_EMAIL` e `UPDATE_PASSWORD`, e coloca o
+        usuário no grupo do papel. Se o e-mail não puder sair (SMTP do realm ausente ou falha), o convite **continua
+        válido** e a resposta `201` informa isso no cabeçalho `X-Invitation-Email: not_sent`; o front pode reenviar.
+        Provedor fora do ar responde `502 identity_provider_unavailable`; o que foi criado nele é desfeito.
       requestBody:
         required: true
         content:
@@ -795,6 +1091,9 @@ paths:
       responses:
         "201":
           description: Convite criado.
+          headers:
+            X-Invitation-Email:
+              $ref: "#/components/headers/InvitationEmail"
           content:
             application/json:
               schema:
@@ -807,6 +1106,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationFailed"
+        "502":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
         "500":
           $ref: "#/components/responses/InternalError"
   /invitations/{invitationId}/resend:
@@ -815,21 +1116,33 @@ paths:
     post:
       tags: [Users]
       operationId: resendInvitation
-      x-status: planned
+      x-status: implemented
       x-permission: users.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Reenvia o convite
-      description: Ainda não implementado. Renova a expiração e reenvia o e-mail.
+      description: |
+        Renova a expiração e o link e pede o e-mail ao provisionador (ADR 0015, D7).
+        Só convite aberto: aceito ou cancelado responde `409 invitation_closed`; empresa `inactive`, `409 company_inactive`.
+        Se o e-mail não sair (SMTP do realm ausente ou falha), responde `204` com `X-Invitation-Email: not_sent`,
+        e o convite continua válido. Provedor fora do ar responde `502 identity_provider_unavailable`.
       responses:
         "204":
-          description: Convite reenviado.
+          description: Convite renovado; o cabeçalho informa se o e-mail saiu.
+          headers:
+            X-Invitation-Email:
+              $ref: "#/components/headers/InvitationEmail"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
         "500":
           $ref: "#/components/responses/InternalError"
   /invitations/{invitationId}:
@@ -838,12 +1151,18 @@ paths:
     delete:
       tags: [Users]
       operationId: cancelInvitation
-      x-status: planned
+      x-status: implemented
       x-permission: users.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Cancela o convite
-      description: Ainda não implementado.
+      description: |
+        Marca o convite como cancelado e remove o usuário do grupo do produto (ADR 0015, D7).
+        Só convite aberto: já aceito ou já cancelado responde `409 invitation_closed`. O usuário `invited` criado
+        pelo convite é excluído logicamente junto, liberando o e-mail.
+        A conta do realm só é apagada se foi criada por este convite e nunca foi usada. Provedor fora do ar
+        responde `502 identity_provider_unavailable`.
       responses:
         "204":
           description: Convite cancelado.
@@ -853,18 +1172,23 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
         "500":
           $ref: "#/components/responses/InternalError"
   /companies:
     get:
       tags: [Companies]
       operationId: listCompanies
-      x-status: planned
+      x-status: implemented
       x-permission: companies.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Lista as empresas clientes
-      description: Ainda não implementado. Só super admin. A empresa operadora da plataforma não aparece na lista.
+      description: Só super admin. A empresa operadora da plataforma não aparece na lista.
       parameters:
         - name: search
           in: query
@@ -892,12 +1216,16 @@ paths:
     post:
       tags: [Companies]
       operationId: createCompany
-      x-status: planned
+      x-status: implemented
       x-permission: companies.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Cadastra empresa cliente
-      description: Ainda não implementado. CNPJ duplicado responde 409.
+      description: |
+        Só super admin. CNPJ duplicado (inclusive de empresa excluída) responde
+        `409 conflict`; CNPJ com dígito verificador inválido responde 422. Plano `trial` cria a empresa com
+        status `trial` e `trial_ends_at` (duração configurável); os demais planos, `active`.
       requestBody:
         required: true
         content:
@@ -925,12 +1253,13 @@ paths:
     get:
       tags: [Companies]
       operationId: getCompaniesSummary
-      x-status: planned
+      x-status: implemented
       x-permission: companies.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Indicadores da tela Empresas
-      description: Ainda não implementado. Só super admin.
+      description: Só super admin.
       responses:
         "200":
           description: Indicadores.
@@ -951,15 +1280,48 @@ paths:
         required: true
         schema:
           type: string
+    get:
+      tags: [Companies]
+      operationId: getCompany
+      x-status: implemented
+      x-permission: companies.manage
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Detalha uma empresa cliente
+      description: Só super admin. A empresa operadora e empresas excluídas respondem `404`.
+      responses:
+        "200":
+          description: Empresa.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Company"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
     patch:
       tags: [Companies]
       operationId: updateCompany
-      x-status: planned
+      x-status: implemented
       x-permission: companies.manage
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Altera empresa (dados, plano, status)
-      description: Ainda não implementado.
+      description: |
+        Só super admin. A empresa operadora não é alterada por aqui (404, como nas listagens).
+        `status: inactive` **corta o acesso de todos os usuários da empresa na hora** (o acesso exige empresa não
+        `inactive`, verificado a cada requisição) e revoga as sessões deles, inclusive as do client `agentes-agro`
+        no Keycloak; as contas do realm não são tocadas. O banco é gravado primeiro e a operação é idempotente:
+        se o provedor falhar, responde `502 identity_provider_unavailable` e repetir a chamada conclui o encerramento
+        das sessões. Reativar (`active` ou `trial`) não reativa usuários `inactive`: o administrador reativa um a um.
+        `status: trial` exige `trial_ends_at` (a API o define ao mudar o plano para `trial`).
       requestBody:
         required: true
         content:
@@ -981,17 +1343,49 @@ paths:
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationFailed"
+        "502":
+          $ref: "#/components/responses/IdentityProviderUnavailable"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Companies]
+      operationId: deleteCompany
+      x-status: implemented
+      x-permission: companies.manage
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Exclui a empresa cliente
+      description: |
+        Só super admin. **Exclusão lógica (soft delete)**, só quando a empresa **não tem
+        usuários `active` nem `invited`** (usuários `inactive` ficam preservados para auditoria): caso contrário
+        responde `409 company_has_active_users` e o administrador deve desativar a empresa ou os usuários antes.
+        A empresa excluída some das listagens e responde `404`; o CNPJ continua reservado (nova empresa com o mesmo
+        CNPJ responde `409 conflict`). A empresa operadora da plataforma nunca é excluída (404). Não toca o Keycloak:
+        sem usuários ativos não há grupo nem sessão do produto a limpar.
+      responses:
+        "204":
+          description: Empresa excluída.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalError"
   /me/profile:
     get:
       tags: [Profile]
       operationId: getMyProfile
-      x-status: planned
+      x-status: implemented
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Perfil do usuário autenticado
-      description: Ainda não implementado. Qualquer papel.
+      description: Qualquer papel.
       responses:
         "200":
           description: Perfil.
@@ -1006,12 +1400,13 @@ paths:
     patch:
       tags: [Profile]
       operationId: updateMyProfile
-      x-status: planned
+      x-status: implemented
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Altera dados pessoais
       description: |
-        Ainda não implementado. Só o nome. E-mail, papel e empresa são geridos por um administrador
+        Só o nome. E-mail, papel e empresa são geridos por um administrador
         (campos ignorados se enviados).
       requestBody:
         required: true
@@ -1037,13 +1432,16 @@ paths:
       tags: [Profile]
       operationId: changeMyPassword
       x-status: planned
+      deprecated: true
       security:
+        - sessionCookie: []
         - bearerAuth: []
-      summary: Troca a senha
+      summary: "[Obsoleto] Troca a senha (somente mock)"
       description: |
-        Ainda não implementado. Exige a senha atual. Regra da nova senha (configuração da API):
-        mínimo de 8 caracteres, com letras e números. Falhas respondem 422 com `details` por campo
-        (`current_password`, `new_password`).
+        **Obsoleto e nunca será implementado no Go** (ADR 0015, D9): a senha é do Keycloak e passa a ser trocada
+        lá; na Fase B a tela do Perfil vira redirecionamento. Existe só para o mock até a Fase B. Exige a senha
+        atual. Regra da nova senha no mock: mínimo de 8 caracteres, com letras e números (a política real é do realm).
+        Falhas respondem 422 com `details` por campo (`current_password`, `new_password`).
       requestBody:
         required: true
         content:
@@ -1066,6 +1464,7 @@ paths:
       x-status: planned
       x-permission: dashboard.view
       security:
+        - sessionCookie: []
         - bearerAuth: []
       summary: Painel do administrador
       description: |
@@ -1099,12 +1498,453 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "500":
           $ref: "#/components/responses/InternalError"
+  /planner/messages:
+    post:
+      tags: [Planner]
+      operationId: sendPlannerMessage
+      x-status: planned
+      x-permission: planner.use
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Envia uma mensagem ao agente de pulverização
+      description: |
+        Ainda não implementado (ADR 0016). A API orquestra o spray-planner; o front nunca o chama.
+        Resposta única (sem streaming). Aptidão, durações, alertas e fontes consultadas chegam prontos.
+        Nada é registrado por esta rota: o plano é só uma proposta (ver `POST /applications`).
+        Falha do agente responde `502 agent_unavailable`; falha da previsão, `502 weather_unavailable`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlannerMessageRequest"
+      responses:
+        "200":
+          description: Resposta do agente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlannerReply"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /planner/window-map:
+    get:
+      tags: [Planner]
+      operationId: getPlannerWindowMap
+      x-status: planned
+      x-permission: planner.use
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Mapa de janelas dos próximos dias
+      description: |
+        Ainda não implementado (ADR 0016). Condição por talhão, dia e hora, e janelas contínuas já agrupadas.
+        A condição é calculada no spray-planner; o front só exibe.
+      parameters:
+        - name: farm_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: field_ids
+          in: query
+          description: Talhões separados por vírgula; omitido = todos os talhões da fazenda.
+          schema:
+            type: string
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 7
+            default: 5
+      responses:
+        "200":
+          description: Mapa de janelas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SprayWindowMap"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /planner/conditions:
+    get:
+      tags: [Planner]
+      operationId: getPlannerConditions
+      x-status: planned
+      x-permission: planner.use
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Condições hora a hora de um dia
+      description: |
+        Ainda não implementado (ADR 0016). Delta T, vento, rajada e chuva por hora, faixas ideais configuradas
+        e, se houver janela, o resumo dela. Sem `window_start`/`window_end`, resume a melhor janela do dia.
+      parameters:
+        - name: farm_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: field_id
+          in: query
+          schema:
+            type: string
+        - name: window_start
+          in: query
+          description: Hora local da fazenda (HH:mm).
+          schema:
+            type: string
+        - name: window_end
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Condições do dia.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DayConditions"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /planner/plans/{planId}/entries/{fieldId}/review:
+    parameters:
+      - name: planId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: fieldId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Planner]
+      operationId: reviewPlanEntry
+      x-status: planned
+      x-permission: applications.register
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Revisão da entrada do plano antes de registrar
+      description: |
+        Ainda não implementado (ADR 0016). Recalcula as checagens com a previsão atual e devolve o retrato
+        mostrado no modal de confirmação humana. O `id` da revisão é exigido por `POST /applications`.
+        Não grava aplicação.
+      responses:
+        "200":
+          description: Revisão.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationReview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /applications:
+    get:
+      tags: [Planner]
+      operationId: listApplications
+      x-status: planned
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Aplicações (histórico e planejadas)
+      description: |
+        Ainda não implementado (ADR 0016, tela "Aplicações"). Lista as aplicações da empresa do usuário nas
+        fazendas do seu escopo (`farm_scope`); fazendas fora do escopo não aparecem e `farm_id` fora dele
+        responde `403 out_of_scope`. Ler não exige capacidade além de estar autenticado e no escopo.
+        Ordem definida pela API: planejadas e em andamento primeiro (mais próxima primeiro), depois as
+        passadas da mais recente para a mais antiga. Condições, totais e rótulos chegam prontos.
+        `summary` traz os 4 indicadores do topo, do **mês corrente** no escopo do usuário (e em `farm_id`, se dado);
+        não muda com `period_days`, talhão, produto, operador, status nem página.
+      parameters:
+        - name: period_days
+          in: query
+          description: |
+            Janela a partir de hoje menos N dias; inclui as planejadas futuras. Padrão 30.
+          schema:
+            type: integer
+            enum: [7, 30, 90]
+            default: 30
+        - name: farm_id
+          in: query
+          schema:
+            type: string
+        - name: field_id
+          in: query
+          schema:
+            type: string
+        - name: product_kind
+          in: query
+          schema:
+            $ref: "#/components/schemas/ProductKind"
+        - name: operator_id
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/ApplicationStatus"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Página de aplicações.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Planner]
+      operationId: registerApplication
+      x-status: planned
+      x-permission: applications.register
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Registra a aplicação planejada após confirmação humana
+      description: |
+        Ainda não implementado (ADR 0016). Só é chamada depois que a pessoa revisa e confirma no modal.
+        A API valida de novo: `confirmation.confirmed` deve ser `true` (`422`), a revisão deve existir e não ter
+        expirado, nenhuma checagem pode estar `blocked` e todo `warning` precisa constar em `acknowledged_warnings`.
+        Condições alteradas desde a revisão respondem `409 conditions_changed`; registro repetido, `409 conflict`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplicationRegistration"
+      responses:
+        "201":
+          description: Aplicação registrada (status `planned`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisteredApplication"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /applications/{applicationId}:
+    parameters:
+      - name: applicationId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      tags: [Planner]
+      operationId: getApplication
+      x-status: planned
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Detalhe de uma aplicação
+      description: |
+        Ainda não implementado (ADR 0016, painel "Aplicação"). Condições registradas, produto e calda,
+        carência, equipe e equipamento, confirmação e assinatura. Aplicação de outra empresa responde `404`;
+        de fazenda fora do `farm_scope`, `403 out_of_scope`.
+      responses:
+        "200":
+          description: Aplicação.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /weather/current:
+    get:
+      tags: [Planner]
+      operationId: getCurrentWeather
+      x-status: planned
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Tempo agora na fazenda
+      description: |
+        Ainda não implementado (ADR 0016). Temperatura e vento atuais do ponto de previsão da fazenda,
+        para o chip de clima ("Guaxupé · 24 °C · vento 7 km/h"). Sem `farm_id`, usa a fazenda principal
+        do usuário. Previsão fora do ar responde `502 weather_unavailable`.
+      parameters:
+        - name: farm_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tempo atual.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentWeather"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /planner/today:
+    get:
+      tags: [Planner]
+      operationId: getTodayBrief
+      x-status: planned
+      x-permission: planner.use
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Visão "Hoje" do operador
+      description: |
+        Ainda não implementado (ADR 0016). Status agora, métricas, linha do dia e tarefa de hoje da fazenda
+        principal do usuário, dentro do `farm_scope`. `task` é nula quando não há aplicação planejada para hoje.
+      responses:
+        "200":
+          description: Visão de hoje.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodayBrief"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /planner/today/tasks/{taskId}/start:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      tags: [Planner]
+      operationId: startTodayTask
+      x-status: planned
+      x-permission: applications.register
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Inicia a aplicação da tarefa de hoje
+      description: |
+        Ainda não implementado (ADR 0016). Passa a aplicação já registrada de `planned` para `in_progress`.
+        `409 conflict` se já iniciada ou se a janela fechou.
+      responses:
+        "200":
+          description: Tarefa iniciada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TodayTask"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "500":
+          $ref: "#/components/responses/InternalError"
 components:
   securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: agro_session
+      description: |
+        Sessão do navegador (ADR 0015, D6), criada por `GET /auth/callback`: valor opaco e aleatório,
+        `HttpOnly`, `SameSite=Lax`, `Secure` sempre. Escrita por cookie exige `Origin` na lista do CORS.
+        Alternativa ao `bearerAuth`: o endpoint aceita um **ou** outro.
     bearerAuth:
       type: http
       scheme: bearer
-      description: Token devolvido por `POST /auth/login`. Exigido apenas pelos endpoints planejados de negócio; probes e docs são públicos.
+      bearerFormat: JWT
+      description: |
+        JWT do realm `inceres` (audiência `agentes-agro`), para clientes máquina a máquina e Swagger (ADR 0015, D6).
+        Alternativa ao `sessionCookie`. Enquanto o login real não existe, o mock do front usa o token de `POST /auth/login` (obsoleto).
+    openIdConnect:
+      type: openIdConnect
+      openIdConnectUrl: http://localhost:8180/realms/inceres/.well-known/openid-configuration
+      description: |
+        Descoberta OIDC do realm `inceres` (valor de desenvolvimento; em outros ambientes o emissor é configuração).
+        Quem fala OIDC é a API (client confidencial `agentes-agro`); o front e os clientes só usam `sessionCookie` ou `bearerAuth`.
   parameters:
     FarmId:
       name: farmId
@@ -1156,6 +1996,14 @@ components:
       schema:
         type: string
         const: no-store
+    InvitationEmail:
+      description: |
+        Se o e-mail de definição de senha saiu (ADR 0015, D5 e D7). `not_sent` quando o SMTP do realm não está
+        configurado ou falhou: o convite continua válido e pode ser reenviado. `not_needed` quando a conta já existia
+        no realm (de outro produto) e o usuário só entra.
+      schema:
+        type: string
+        enum: [sent, not_sent, not_needed]
   responses:
     HealthUp:
       description: O componente está saudável.
@@ -1222,10 +2070,73 @@ components:
             error:
               code: internal_error
               message: erro interno
+    BadGateway:
+      description: |
+        Dependência externa indisponível (ADR 0016). `agent_unavailable`: o agente não respondeu;
+        `weather_unavailable`: a previsão do tempo está fora do ar. Nunca há resposta inventada.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            agent:
+              value:
+                error:
+                  code: agent_unavailable
+                  message: o agente de pulverização está indisponível
+            weather:
+              value:
+                error:
+                  code: weather_unavailable
+                  message: a previsão do tempo está indisponível
+    IdentityProviderUnavailable:
+      description: |
+        O provedor de identidade (Keycloak) está indisponível ou recusou a operação (ADR 0015, D5). Nada fica
+        registrado pela metade: o que foi criado no provedor é desfeito, e o erro é informado, nunca inventado.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: identity_provider_unavailable
+              message: o provedor de identidade está indisponível
+    ProductAccessDenied:
+      description: |
+        A identidade é válida, mas não dá acesso ao produto (ADR 0015, D3 e D4). `user_not_provisioned`: a conta
+        existe no SSO, mas ninguém a convidou para o Agentes Agro (não há provisionamento no primeiro login);
+        `no_access_to_product`: a conta não tem nenhum papel do produto; `ambiguous_role`: tem mais de um
+        (nunca vale o mais alto; gera auditoria). Usuário `inactive` ou empresa `inactive` responde `forbidden`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          examples:
+            notProvisioned:
+              value:
+                error:
+                  code: user_not_provisioned
+                  message: sua conta ainda não foi convidada para o Agentes Agro
+            noAccess:
+              value:
+                error:
+                  code: no_access_to_product
+                  message: sua conta não tem acesso ao Agentes Agro
+            ambiguousRole:
+              value:
+                error:
+                  code: ambiguous_role
+                  message: sua conta tem mais de um papel no Agentes Agro
+            inactive:
+              value:
+                error:
+                  code: forbidden
+                  message: usuário ou empresa inativos
     Forbidden:
       description: |
         Ação não permitida (ADR 0013). `forbidden`: o papel não tem a capacidade exigida;
         `out_of_scope`: o recurso está fora das fazendas liberadas para o usuário.
+        Em `GET /auth/me` e `GET /auth/callback`, a falta de acesso ao produto usa `ProductAccessDenied`.
       content:
         application/json:
           schema:
@@ -1265,15 +2176,59 @@ components:
                 - field: document
                   message: CPF inválido
     Conflict:
-      description: Conflito com um recurso existente (por exemplo, CPF/CNPJ já cadastrado).
+      description: |
+        Conflito com um recurso existente ou com o estado dele. `conflict`: duplicidade genérica (CPF/CNPJ);
+        `email_already_registered`: e-mail já usado por usuário do produto; `email_not_verified`: conta do realm com
+        e-mail não verificado (não é vinculada); `company_inactive`: empresa inativa;
+        `company_has_active_users`: exclusão de empresa com usuários `active` ou `invited`;
+        `invitation_closed`: convite já aceito ou cancelado; `invitation_pending`: usuário com convite aberto
+        não é excluído, o convite é cancelado; `last_super_admin`: a operação deixaria a plataforma sem nenhum
+        super admin ativo (desativar, excluir ou rebaixar o último).
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/Error"
-          example:
-            error:
-              code: conflict
-              message: CPF já cadastrado
+          examples:
+            duplicate:
+              value:
+                error:
+                  code: conflict
+                  message: CPF já cadastrado
+            emailAlreadyRegistered:
+              value:
+                error:
+                  code: email_already_registered
+                  message: e-mail já cadastrado
+            emailNotVerified:
+              value:
+                error:
+                  code: email_not_verified
+                  message: a conta existente ainda não verificou o e-mail
+            companyInactive:
+              value:
+                error:
+                  code: company_inactive
+                  message: a empresa está inativa
+            companyHasActiveUsers:
+              value:
+                error:
+                  code: company_has_active_users
+                  message: a empresa ainda tem usuários ativos ou convidados
+            invitationClosed:
+              value:
+                error:
+                  code: invitation_closed
+                  message: o convite já foi aceito ou cancelado
+            invitationPending:
+              value:
+                error:
+                  code: invitation_pending
+                  message: usuário com convite pendente; cancele o convite
+            lastSuperAdmin:
+              value:
+                error:
+                  code: last_super_admin
+                  message: a plataforma precisa de ao menos um super admin ativo
     PayloadTooLarge:
       description: Arquivo acima do limite.
       content:
@@ -1342,6 +2297,20 @@ components:
                 - unsupported_media_type
                 - forbidden
                 - out_of_scope
+                - agent_unavailable
+                - weather_unavailable
+                - conditions_changed
+                - user_not_provisioned
+                - no_access_to_product
+                - ambiguous_role
+                - identity_provider_unavailable
+                - email_already_registered
+                - email_not_verified
+                - company_inactive
+                - company_has_active_users
+                - invitation_closed
+                - invitation_pending
+                - last_super_admin
             message:
               type: string
               description: Mensagem legível para humanos.
@@ -1413,13 +2382,15 @@ components:
         - $ref: "#/components/schemas/GeoJsonMultiPolygon"
     LoginRequest:
       type: object
+      deprecated: true
+      description: Obsoleto, só para o mock (ver `POST /auth/login`).
       required: [identifier, password, remember_me]
       properties:
         identifier:
           type: string
           minLength: 1
-          description: E-mail ou CPF do usuário.
-          examples: [bruno@fazendasantarita.com.br, 123.278.916-05]
+          description: E-mail do usuário. O login por CPF saiu do contrato (nenhum campo de usuário guarda CPF).
+          examples: [bruno@fazendasantarita.com.br]
         password:
           type: string
           format: password
@@ -1429,6 +2400,8 @@ components:
           description: Sessão longa ("Manter conectado"); a duração exata é configuração da API.
     LoginResponse:
       type: object
+      deprecated: true
+      description: Obsoleto, só para o mock (ver `POST /auth/login`).
       required: [access_token, token_type, expires_at, user]
       properties:
         access_token:
@@ -1447,7 +2420,10 @@ components:
       description: Papéis da ADR 0013. As capacidades de cada um estão em `Permission`.
     User:
       type: object
-      description: Sessão (`GET /auth/me` e login). O front decide o que mostrar por `permissions`.
+      description: |
+        Sessão (`GET /auth/me` e login do mock). O front decide o que mostrar por `permissions`.
+        `role` é o único papel do produto no token; `permissions` é a interseção do claim
+        `resource_access.agentes-agro.roles` com o enum `Permission` (ADR 0015, D3).
       required: [id, name, email, role, primary_farm, company, farm_scope, permissions]
       properties:
         id:
@@ -1982,6 +2958,11 @@ components:
         - planner.use
       description: |
         Capacidade devolvida em `User.permissions`. O front verifica capacidades, nunca nomes de papel.
+
+        **Especificação do realm (ADR 0015, D3):** este enum e a tabela abaixo são a fonte única do que o realm
+        `inceres` implementa como *client roles* do client `agentes-agro` (8 permissões e 3 papéis compostos);
+        o teste de contrato `make keycloak-test` falha se divergirem. A API não mantém tabela papel → permissões:
+        vale a interseção do claim do token com este enum.
         Ler cadastros (fazendas, talhões, proprietários) no próprio escopo não exige capacidade.
 
         | Capacidade | super_admin | admin | planning_operator |
@@ -2104,6 +3085,10 @@ components:
       type: object
       minProperties: 1
       properties:
+        name:
+          type: string
+          minLength: 1
+          description: Nome de exibição (dono é a API; não altera o nome da conta no realm).
         role:
           $ref: "#/components/schemas/UserRole"
         company_id:
@@ -2248,6 +3233,7 @@ components:
           $ref: "#/components/schemas/CompanyStatus"
     Profile:
       type: object
+      description: Perfil do usuário autenticado. `password_changed_at` é obsoleto (a senha é do Keycloak).
       required: [id, name, email, role, company, farm_scope, password_changed_at]
       properties:
         id:
@@ -2264,6 +3250,8 @@ components:
         farm_scope:
           $ref: "#/components/schemas/FarmScope"
         password_changed_at:
+          deprecated: true
+          description: Obsoleto, só para o mock (ADR 0015, D9); a API real devolve `null`, pois não conhece a senha.
           type: [string, "null"]
           format: date-time
     ProfileUpdate:
@@ -2439,3 +3427,831 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ActivityEntry"
+    # --- Planejador de pulverização (ADR 0016) ----------------------------------
+    ProductKind:
+      type: string
+      enum: [fungicide, insecticide, herbicide, foliar, other]
+    Dose:
+      type: object
+      description: Dose sempre com unidade explícita.
+      required: [value, unit]
+      properties:
+        value:
+          type: number
+        unit:
+          type: string
+          examples: [L/ha]
+    PlannerContext:
+      type: object
+      required: [farm_id, field_ids, product_kind]
+      properties:
+        farm_id:
+          type: string
+        field_ids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        product_kind:
+          oneOf:
+            - $ref: "#/components/schemas/ProductKind"
+            - type: "null"
+    PlannerMessageRequest:
+      type: object
+      required: [conversation_id, text, context]
+      properties:
+        conversation_id:
+          type: [string, "null"]
+          description: Nulo na primeira mensagem; depois, o valor devolvido na resposta.
+        text:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        context:
+          $ref: "#/components/schemas/PlannerContext"
+    ConsultedSource:
+      type: object
+      description: Fonte consultada pelo agente ("O agente consultou").
+      required: [kind, title, detail]
+      properties:
+        kind:
+          type: string
+          enum: [weather, conditions, product_rules, operational_capacity]
+        title:
+          type: string
+          examples: [Previsão do tempo]
+        detail:
+          type: string
+          examples: [Open-Meteo · 5 dias, hora a hora]
+    PlanWindow:
+      type: object
+      required: [date, start_time, end_time, condition]
+      properties:
+        date:
+          type: string
+          format: date
+        start_time:
+          type: string
+          description: Hora local da fazenda (HH:mm).
+        end_time:
+          type: string
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+    PlanAlert:
+      type: object
+      required: [kind, message, required_minutes, available_minutes]
+      properties:
+        kind:
+          type: string
+          enum: [window_too_short, rain_risk, interval_not_met]
+        message:
+          type: string
+          description: Texto pronto, incluindo a sugestão do agente.
+        required_minutes:
+          type: [integer, "null"]
+        available_minutes:
+          type: [integer, "null"]
+    PlanEntry:
+      type: object
+      required: [field_id, field_label, area_ha, window, duration_minutes, alert]
+      properties:
+        field_id:
+          type: string
+        field_label:
+          type: string
+          examples: [T3]
+        area_ha:
+          type: number
+          description: Área a aplicar (pode ser menor que a área do talhão).
+        window:
+          $ref: "#/components/schemas/PlanWindow"
+        duration_minutes:
+          type: integer
+          description: Calculada com o rendimento operacional do equipamento.
+        alert:
+          oneOf:
+            - $ref: "#/components/schemas/PlanAlert"
+            - type: "null"
+    SprayPlan:
+      type: object
+      description: Proposta do agente. Não é uma aplicação registrada.
+      required: [id, farm_id, product_kind, headline, total_area_ha, capacity_ha_per_hour, entries]
+      properties:
+        id:
+          type: string
+        farm_id:
+          type: string
+        product_kind:
+          $ref: "#/components/schemas/ProductKind"
+        headline:
+          type: string
+          examples: [2 janelas aptas cobrem os 90 ha]
+        total_area_ha:
+          type: number
+        capacity_ha_per_hour:
+          type: number
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlanEntry"
+    PlannerMessage:
+      type: object
+      required: [id, text, created_at]
+      properties:
+        id:
+          type: string
+        text:
+          type: string
+          description: Parágrafos separados por linha em branco.
+        created_at:
+          type: string
+          format: date-time
+    PlannerReply:
+      type: object
+      required: [conversation_id, message, consulted, plan, suggestions]
+      properties:
+        conversation_id:
+          type: string
+        message:
+          $ref: "#/components/schemas/PlannerMessage"
+        consulted:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConsultedSource"
+        plan:
+          oneOf:
+            - $ref: "#/components/schemas/SprayPlan"
+            - type: "null"
+        suggestions:
+          type: array
+          description: Próximas perguntas sugeridas.
+          items:
+            type: string
+    HourCondition:
+      type: object
+      required: [hour, condition]
+      properties:
+        hour:
+          type: integer
+          minimum: 0
+          maximum: 23
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+    FieldDayConditions:
+      type: object
+      required: [date, hours]
+      properties:
+        date:
+          type: string
+          format: date
+        hours:
+          type: array
+          items:
+            $ref: "#/components/schemas/HourCondition"
+    FieldWindowRow:
+      type: object
+      required: [field_id, field_label, days]
+      properties:
+        field_id:
+          type: string
+        field_label:
+          type: string
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldDayConditions"
+    SprayWindowSlot:
+      type: object
+      description: Janela contínua apta, já agrupada pelo spray-planner.
+      required: [field_id, field_label, date, start_time, end_time, duration_minutes, condition]
+      properties:
+        field_id:
+          type: string
+        field_label:
+          type: string
+        date:
+          type: string
+          format: date
+        start_time:
+          type: string
+        end_time:
+          type: string
+        duration_minutes:
+          type: integer
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+    SprayWindowMap:
+      type: object
+      required: [farm_id, generated_at, forecast_updated_at, day_start_hour, day_end_hour, fields, windows]
+      properties:
+        farm_id:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        forecast_updated_at:
+          type: string
+          format: date-time
+          description: Quando a previsão foi atualizada ("dados de hoje 05:40").
+        day_start_hour:
+          type: integer
+        day_end_hour:
+          type: integer
+          description: Última hora incluída em cada dia.
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldWindowRow"
+        windows:
+          type: array
+          items:
+            $ref: "#/components/schemas/SprayWindowSlot"
+    ValueRange:
+      type: object
+      required: [min, max]
+      properties:
+        min:
+          type: number
+        max:
+          type: number
+    HourlyConditions:
+      type: object
+      required: [hour, delta_t_c, wind_kmh, gust_kmh, rain_mm, condition]
+      properties:
+        hour:
+          type: integer
+        delta_t_c:
+          type: number
+        wind_kmh:
+          type: number
+        gust_kmh:
+          type: number
+        rain_mm:
+          type: number
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+    WindowConditionSummary:
+      type: object
+      required: [start_time, end_time, delta_t_min_c, delta_t_max_c, wind_avg_kmh, gust_max_kmh, rain_mm, rain_until_hour, next_rain_at]
+      properties:
+        start_time:
+          type: string
+        end_time:
+          type: string
+        delta_t_min_c:
+          type: number
+        delta_t_max_c:
+          type: number
+        wind_avg_kmh:
+          type: number
+        gust_max_kmh:
+          type: number
+        rain_mm:
+          type: number
+          description: Chuva acumulada até `rain_until_hour`.
+        rain_until_hour:
+          type: integer
+        next_rain_at:
+          type: [string, "null"]
+          format: date-time
+    DayConditions:
+      type: object
+      required: [farm_id, date, ideal_ranges, hours, window_summary]
+      properties:
+        farm_id:
+          type: string
+        date:
+          type: string
+          format: date
+        ideal_ranges:
+          type: object
+          description: Faixas ideais vindas da configuração do spray-planner.
+          required: [delta_t_c, wind_kmh]
+          properties:
+            delta_t_c:
+              $ref: "#/components/schemas/ValueRange"
+            wind_kmh:
+              $ref: "#/components/schemas/ValueRange"
+        hours:
+          type: array
+          items:
+            $ref: "#/components/schemas/HourlyConditions"
+        window_summary:
+          oneOf:
+            - $ref: "#/components/schemas/WindowConditionSummary"
+            - type: "null"
+    ReviewCheck:
+      type: object
+      required: [code, status, title, detail]
+      properties:
+        code:
+          type: string
+          enum: [delta_t, wind, rain_after, interval_since_last, pre_harvest_interval, operator_equipment, window_fits]
+        status:
+          type: string
+          enum: [ok, warning, blocked]
+        title:
+          type: string
+        detail:
+          type: string
+    ApplicationReview:
+      type: object
+      required: [id, plan_id, field_id, field_label, variety, area_ha, window, product, mix_volume_l, tank_count, tank_capacity_l, checks, operator, equipment, can_confirm, expires_at]
+      properties:
+        id:
+          type: string
+        plan_id:
+          type: string
+        field_id:
+          type: string
+        field_label:
+          type: string
+        variety:
+          type: [string, "null"]
+        area_ha:
+          type: number
+        window:
+          $ref: "#/components/schemas/PlanWindow"
+        product:
+          type: object
+          required: [kind, name, dose, mix_rate_l_per_ha]
+          properties:
+            kind:
+              $ref: "#/components/schemas/ProductKind"
+            name:
+              type: string
+            dose:
+              $ref: "#/components/schemas/Dose"
+            mix_rate_l_per_ha:
+              type: number
+        mix_volume_l:
+          type: number
+        tank_count:
+          type: integer
+        tank_capacity_l:
+          type: number
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewCheck"
+        operator:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        equipment:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+        can_confirm:
+          type: boolean
+          description: Falso quando alguma checagem está `blocked`.
+        expires_at:
+          type: string
+          format: date-time
+    ApplicationRegistration:
+      type: object
+      required: [plan_id, field_id, review_id, confirmation]
+      properties:
+        plan_id:
+          type: string
+        field_id:
+          type: string
+        review_id:
+          type: string
+        confirmation:
+          type: object
+          required: [confirmed, acknowledged_warnings]
+          properties:
+            confirmed:
+              type: boolean
+              const: true
+              description: Confirmação humana explícita ("Revisei as condições e confirmo a aplicação").
+            acknowledged_warnings:
+              type: array
+              description: Códigos das checagens `warning` exibidas na revisão.
+              items:
+                type: string
+    RegisteredApplication:
+      type: object
+      required: [id, status, field_id, field_label, area_ha, window, registered_at, registered_by]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [planned]
+        field_id:
+          type: string
+        field_label:
+          type: string
+        area_ha:
+          type: number
+        window:
+          $ref: "#/components/schemas/PlanWindow"
+        registered_at:
+          type: string
+          format: date-time
+        registered_by:
+          type: object
+          required: [id, name]
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+    TodayStatus:
+      type: object
+      required: [condition, headline, until_time, remaining_minutes, window_start, window_end]
+      properties:
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+        headline:
+          type: string
+          examples: [Pode pulverizar]
+        until_time:
+          type: [string, "null"]
+        remaining_minutes:
+          type: [integer, "null"]
+        window_start:
+          type: [string, "null"]
+        window_end:
+          type: [string, "null"]
+    TodayMetric:
+      type: object
+      required: [kind, label, value, unit, condition]
+      properties:
+        kind:
+          type: string
+          enum: [delta_t, wind, rain]
+        label:
+          type: string
+          examples: [Chuva 4h]
+        value:
+          type: number
+        unit:
+          type: string
+          examples: ["°C", km/h, mm]
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+    TodayHour:
+      type: object
+      required: [hour, condition, is_current]
+      properties:
+        hour:
+          type: integer
+        condition:
+          $ref: "#/components/schemas/SprayCondition"
+        is_current:
+          type: boolean
+    TodayTask:
+      type: object
+      required: [id, field_id, field_label, field_name, operation, area_ha, dose, tank_count, tank_capacity_l, status]
+      properties:
+        id:
+          type: string
+        field_id:
+          type: string
+        field_label:
+          type: string
+        field_name:
+          type: string
+        operation:
+          type: string
+          examples: [Fungicida]
+        area_ha:
+          type: number
+        dose:
+          $ref: "#/components/schemas/Dose"
+        tank_count:
+          type: integer
+        tank_capacity_l:
+          type: number
+        status:
+          type: string
+          enum: [planned, in_progress]
+    TodayBrief:
+      type: object
+      required: [farm, as_of, status, metrics, hours, task]
+      properties:
+        farm:
+          $ref: "#/components/schemas/FarmRef"
+        as_of:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/TodayStatus"
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayMetric"
+        hours:
+          type: array
+          items:
+            $ref: "#/components/schemas/TodayHour"
+        task:
+          oneOf:
+            - $ref: "#/components/schemas/TodayTask"
+            - type: "null"
+    # --- Aplicações: histórico e detalhe (ADR 0016) -------------------------------
+    PersonRef:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+    ApplicationStatus:
+      type: string
+      enum: [planned, in_progress, completed, cancelled]
+      description: "planned: registrada após confirmação e ainda não executada; in_progress: iniciada pelo operador; completed: concluída; cancelled: cancelada."
+    ApplicationWindow:
+      type: object
+      required: [date, start_time, end_time]
+      properties:
+        date:
+          type: string
+          format: date
+        start_time:
+          type: string
+          description: Hora local da fazenda (HH:mm).
+        end_time:
+          type: string
+    ApplicationFieldRef:
+      type: object
+      required: [id, label, name, variety, block]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+          examples: [T5]
+        name:
+          type: string
+          examples: [Talhão 5]
+        variety:
+          type: [string, "null"]
+        block:
+          type: [string, "null"]
+    ApplicationProduct:
+      type: object
+      required: [kind, name, dose, mix_rate_l_per_ha]
+      properties:
+        kind:
+          $ref: "#/components/schemas/ProductKind"
+        name:
+          type: string
+        dose:
+          $ref: "#/components/schemas/Dose"
+        mix_rate_l_per_ha:
+          type: number
+    ApplicationConditionsSummary:
+      type: object
+      description: |
+        Condições da linha da lista. `recorded`: medidas na aplicação; `forecast`: previsão para a janela;
+        `live`: sem números ainda (previsão ao vivo). `rain_mm` preenchido numa cancelada indica chuva como motivo.
+      required: [source, delta_t_c, wind_kmh, rain_mm]
+      properties:
+        source:
+          type: string
+          enum: [recorded, forecast, live]
+        delta_t_c:
+          type: [number, "null"]
+        wind_kmh:
+          type: [number, "null"]
+        rain_mm:
+          type: [number, "null"]
+    ApplicationSummary:
+      type: object
+      required: [id, status, farm_id, window, field, product, area_ha, conditions, operator]
+      properties:
+        id:
+          type: string
+        status:
+          $ref: "#/components/schemas/ApplicationStatus"
+        farm_id:
+          type: string
+        window:
+          $ref: "#/components/schemas/ApplicationWindow"
+        field:
+          $ref: "#/components/schemas/ApplicationFieldRef"
+        product:
+          $ref: "#/components/schemas/ApplicationProduct"
+        area_ha:
+          type: number
+        conditions:
+          $ref: "#/components/schemas/ApplicationConditionsSummary"
+        operator:
+          $ref: "#/components/schemas/PersonRef"
+    ApplicationFacets:
+      type: object
+      description: Opções dos filtros no escopo do usuário, sem aplicar os filtros da requisição.
+      required: [fields, operators]
+      properties:
+        fields:
+          type: array
+          items:
+            type: object
+            required: [id, label, name]
+            properties:
+              id:
+                type: string
+              label:
+                type: string
+              name:
+                type: string
+        operators:
+          type: array
+          items:
+            $ref: "#/components/schemas/PersonRef"
+    ApplicationMonthSummary:
+      type: object
+      description: Indicadores do topo da tela Aplicações, do mês corrente. Todos os números são calculados pela API.
+      required: [month_count, applied_area, within_window, next]
+      properties:
+        month_count:
+          type: object
+          description: Aplicações do mês por status ("No mês").
+          required: [total, planned, in_progress, completed, cancelled]
+          properties:
+            total:
+              type: integer
+            planned:
+              type: integer
+            in_progress:
+              type: integer
+            completed:
+              type: integer
+            cancelled:
+              type: integer
+        applied_area:
+          type: object
+          description: Área aplicada no mês e a participação na área produtiva ("Área aplicada").
+          required: [area_ha, productive_area_ha, percent]
+          properties:
+            area_ha:
+              type: number
+            productive_area_ha:
+              type: number
+            percent:
+              type: [integer, "null"]
+        within_window:
+          type: object
+          description: Aplicações do mês com Delta T e vento ideais ("Dentro da janela"). `percent` é nulo sem aplicações.
+          required: [percent, within, total]
+          properties:
+            percent:
+              type: [integer, "null"]
+            within:
+              type: integer
+            total:
+              type: integer
+        next:
+          description: Próxima aplicação planejada ("Próxima"); nula sem planejadas.
+          oneOf:
+            - type: object
+              required: [application_id, date, start_time, end_time, field_label, product_name]
+              properties:
+                application_id:
+                  type: string
+                date:
+                  type: string
+                  format: date
+                start_time:
+                  type: string
+                end_time:
+                  type: string
+                field_label:
+                  type: string
+                product_name:
+                  type: string
+            - type: "null"
+    ApplicationPage:
+      type: object
+      required: [items, total, page, page_size, facets, summary]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ApplicationSummary"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+        facets:
+          $ref: "#/components/schemas/ApplicationFacets"
+        summary:
+          $ref: "#/components/schemas/ApplicationMonthSummary"
+    ApplicationDetail:
+      allOf:
+        - $ref: "#/components/schemas/ApplicationSummary"
+        - type: object
+          required: [registered_at, recorded_conditions, usage, pre_harvest, equipment, confirmed_by, signed, cancellation]
+          properties:
+            registered_at:
+              type: string
+              format: date-time
+            recorded_conditions:
+              description: Nulo enquanto não há condições registradas (planejada, cancelada sem medição).
+              oneOf:
+                - type: object
+                  required: [headline, delta_t_c, wind_kmh, rain_mm, rain_hours, duration_minutes]
+                  properties:
+                    headline:
+                      type: string
+                      examples: [Dentro da janela]
+                    delta_t_c:
+                      type: number
+                    wind_kmh:
+                      type: number
+                    rain_mm:
+                      type: number
+                    rain_hours:
+                      type: integer
+                      description: Horizonte da chuva ("Chuva 8h").
+                    duration_minutes:
+                      type: integer
+                - type: "null"
+            usage:
+              type: object
+              description: Totais calculados pela API.
+              required: [lot, dose_total_l, mix_total_l, tank_count, tank_capacity_l]
+              properties:
+                lot:
+                  type: [string, "null"]
+                dose_total_l:
+                  type: number
+                mix_total_l:
+                  type: number
+                tank_count:
+                  type: integer
+                tank_capacity_l:
+                  type: number
+            pre_harvest:
+              oneOf:
+                - type: object
+                  required: [days, released_from]
+                  properties:
+                    days:
+                      type: integer
+                    released_from:
+                      type: [string, "null"]
+                      format: date
+                - type: "null"
+            equipment:
+              type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+            confirmed_by:
+              oneOf:
+                - type: object
+                  required: [person, at]
+                  properties:
+                    person:
+                      $ref: "#/components/schemas/PersonRef"
+                    at:
+                      type: string
+                      format: date-time
+                - type: "null"
+            signed:
+              type: boolean
+              description: Registro assinado digitalmente (válido para o caderno de campo).
+            cancellation:
+              oneOf:
+                - type: object
+                  required: [reason]
+                  properties:
+                    reason:
+                      type: string
+                - type: "null"
+    CurrentWeather:
+      type: object
+      required: [farm_id, city, state, temperature_c, wind_kmh, observed_at]
+      properties:
+        farm_id:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        temperature_c:
+          type: number
+        wind_kmh:
+          type: number
+        observed_at:
+          type: string
+          format: date-time

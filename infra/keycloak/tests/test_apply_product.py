@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import apply_product as app
+import verify_realm as verify
 
 SPEC = app.DEFAULT_SPEC
 OPENAPI = app.HERE.parent.parent / "services" / "api" / "api" / "openapi.yaml"
@@ -26,6 +27,22 @@ PLACEHOLDERS = {
 ADMIN_ENV = {"KEYCLOAK_ADMIN_USER": "admin", "KEYCLOAK_ADMIN_PASSWORD": "pw"}
 
 
+REALM_DEFAULT_SCOPES = ("web-origins", "acr", "roles", "profile", "basic", "email")
+REALM_OPTIONAL_SCOPES = ("address", "phone", "offline_access", "organization", "microprofile-jwt")
+COMPLIANT_REALM: dict[str, Any] = {
+    "registrationAllowed": False,
+    "verifyEmail": True,
+    "duplicateEmailsAllowed": False,
+    "sslRequired": "external",
+    "eventsEnabled": True,
+    "adminEventsEnabled": True,
+    "bruteForceProtected": True,
+    "passwordPolicy": "length(8) and digits(1) and lowerCase(1) and notUsername",
+    "revokeRefreshToken": True,
+    "adminPermissionsEnabled": True,
+}
+
+
 class FakeKeycloak:
     """In-memory stand-in with the semantics of the Keycloak calls the reconciler uses."""
 
@@ -40,6 +57,12 @@ class FakeKeycloak:
         self.groups: dict[str, dict[str, Any]] = {}
         self.mappings: dict[tuple[str, str, str], set[str]] = defaultdict(set)
         self.default_scopes: dict[str, set[str]] = defaultdict(set)
+        self.optional_scopes: dict[str, set[str]] = defaultdict(set)
+        self.foreign_composites: dict[tuple[str, str], list[app.RoleRef]] = defaultdict(list)
+        self.realm_group_mappings: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
+        self.realm: dict[str, Any] = dict(COMPLIANT_REALM)
+        self.members: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        self.direct_users: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         self.realm_management = self._seed_client(
             "realm-management", ["manage-users", "view-users", "manage-clients"]
         )
@@ -57,6 +80,12 @@ class FakeKeycloak:
     def _write(self) -> None:
         self.writes += 1
 
+    def get_realm(self) -> dict[str, Any]:
+        return dict(self.realm)
+
+    def client_id_of(self, client_uuid: str) -> str:
+        return str(self.clients[client_uuid]["clientId"])
+
     # Clients
 
     def find_client(self, client_id: str) -> dict[str, Any] | None:
@@ -71,6 +100,11 @@ class FakeKeycloak:
         body = {k: v for k, v in representation.items() if k != "secret"}
         self.clients[client_uuid] = {"id": client_uuid, **body}
         self.secrets[client_uuid] = representation.get("secret", "")
+        # What Keycloak attaches to every new client; the reconciler prunes what is not declared.
+        self.default_scopes[client_uuid] = set(REALM_DEFAULT_SCOPES)
+        self.optional_scopes[client_uuid] = set(REALM_OPTIONAL_SCOPES)
+        if representation.get("serviceAccountsEnabled"):
+            self.default_scopes[client_uuid].add("service_account")
         return client_uuid
 
     def update_client(self, client_uuid: str, representation: dict[str, Any]) -> None:
@@ -96,6 +130,10 @@ class FakeKeycloak:
             mapper if m["id"] == mapper["id"] else m for m in self.mappers[client_uuid]
         ]
 
+    def delete_protocol_mapper(self, client_uuid: str, mapper_id: str) -> None:
+        self._write()
+        self.mappers[client_uuid] = [m for m in self.mappers[client_uuid] if m["id"] != mapper_id]
+
     # Roles
 
     def list_client_roles(self, client_uuid: str) -> dict[str, dict[str, Any]]:
@@ -113,8 +151,14 @@ class FakeKeycloak:
         self._write()
         self.roles[client_uuid][name]["description"] = description
 
-    def get_composites(self, client_uuid: str, role_name: str) -> set[str]:
-        return set(self.composites[(client_uuid, role_name)])
+    def get_composites(self, client_uuid: str, role_name: str) -> list[app.RoleRef]:
+        own = [
+            app.RoleRef(
+                client_uuid, self.client_id_of(client_uuid), name, self.roles[client_uuid][name]
+            )
+            for name in sorted(self.composites[(client_uuid, role_name)])
+        ]
+        return own + list(self.foreign_composites[(client_uuid, role_name)])
 
     def add_composites(self, client_uuid: str, role_name: str, roles: list[dict[str, Any]]) -> None:
         self._write()
@@ -124,7 +168,14 @@ class FakeKeycloak:
         self, client_uuid: str, role_name: str, roles: list[dict[str, Any]]
     ) -> None:
         self._write()
-        self.composites[(client_uuid, role_name)] -= {role["name"] for role in roles}
+        ids = {role["id"] for role in roles}
+        key = (client_uuid, role_name)
+        self.composites[key] = {
+            n for n in self.composites[key] if self.roles[client_uuid][n]["id"] not in ids
+        }
+        self.foreign_composites[key] = [
+            ref for ref in self.foreign_composites[key] if ref.representation["id"] not in ids
+        ]
 
     # Groups
 
@@ -146,17 +197,59 @@ class FakeKeycloak:
             if parent is not None and p.rpartition("/")[0] == parent
         ]
 
+    def list_group_role_mappings(self, group_id: str) -> list[app.RoleRef]:
+        refs = [
+            app.RoleRef(None, "realm", name, rep)
+            for name, rep in self.realm_group_mappings[group_id].items()
+        ]
+        for (owner, owner_id, client_uuid), names in self.mappings.items():
+            if owner == "groups" and owner_id == group_id:
+                refs.extend(
+                    app.RoleRef(
+                        client_uuid,
+                        self.client_id_of(client_uuid),
+                        name,
+                        self.roles[client_uuid].get(name, {"id": name, "name": name}),
+                    )
+                    for name in sorted(names)
+                )
+        return refs
+
+    def remove_group_role_mappings(
+        self, group_id: str, container_id: str | None, roles: list[dict[str, Any]]
+    ) -> None:
+        self._write()
+        names = {role["name"] for role in roles}
+        if container_id is None:
+            for name in names:
+                self.realm_group_mappings[group_id].pop(name, None)
+        else:
+            self.mappings[("groups", group_id, container_id)] -= names
+
+    def list_group_members(self, group_id: str) -> list[dict[str, Any]]:
+        return list(self.members[group_id])
+
+    def list_users_with_role(self, client_uuid: str, role_name: str) -> list[dict[str, Any]]:
+        return list(self.direct_users[(client_uuid, role_name)])
+
     # Service accounts, client scopes and role mappings
 
     def service_account_user_id(self, client_uuid: str) -> str:
         return f"service-account-{client_uuid}"
 
-    def get_default_client_scopes(self, client_uuid: str) -> set[str]:
-        return set(self.default_scopes[client_uuid])
+    def _scopes(self, kind: str) -> dict[str, set[str]]:
+        return self.default_scopes if kind == "default" else self.optional_scopes
 
-    def add_default_client_scope(self, client_uuid: str, scope_name: str) -> None:
+    def get_client_scopes(self, client_uuid: str, kind: Any) -> set[str]:
+        return set(self._scopes(kind)[client_uuid])
+
+    def add_client_scope(self, client_uuid: str, kind: Any, scope_name: str) -> None:
         self._write()
-        self.default_scopes[client_uuid].add(scope_name)
+        self._scopes(kind)[client_uuid].add(scope_name)
+
+    def remove_client_scope(self, client_uuid: str, kind: Any, scope_name: str) -> None:
+        self._write()
+        self._scopes(kind)[client_uuid].discard(scope_name)
 
     def get_role_mappings(self, owner: str, owner_id: str, client_uuid: str) -> set[str]:
         return set(self.mappings[(owner, owner_id, client_uuid)])
@@ -190,9 +283,14 @@ class ReconcileTest(unittest.TestCase):
         self.state = app.load_desired_state(SPEC, PLACEHOLDERS)
         self.product_uuid = ""
 
+    def client_uuid(self, client_id: str) -> str:
+        client = self.fake.find_client(client_id)
+        assert client is not None
+        return str(client["id"])
+
     def apply_once(self) -> None:
         reconcile(self.fake)
-        self.product_uuid = self.fake.find_client("agentes-agro")["id"]
+        self.product_uuid = self.client_uuid("agentes-agro")
 
     def test_first_run_creates_clients_roles_groups_and_grants(self) -> None:
         self.apply_once()
@@ -211,19 +309,28 @@ class ReconcileTest(unittest.TestCase):
         )
         admins = self.fake.groups["/agentes-agro/admins"]["id"]
         self.assertEqual(self.fake.mappings[("groups", admins, self.product_uuid)], {"admin"})
-        provisioner = self.fake.find_client("agentes-agro-provisioner")["id"]
+        provisioner = self.client_uuid("agentes-agro-provisioner")
         self.assertEqual(
             self.fake.mappings[
                 ("users", f"service-account-{provisioner}", self.fake.realm_management)
             ],
             {"manage-users", "view-users"},
         )
-        self.assertEqual(self.fake.mappers[self.product_uuid][0]["name"], "audience-agentes-agro")
+        self.assertEqual(
+            {m["name"] for m in self.fake.mappers[self.product_uuid]},
+            {"audience-agentes-agro", "client-roles-agentes-agro"},
+        )
         self.assertEqual(
             self.fake.mappings[("scope", provisioner, self.fake.realm_management)],
             {"manage-users", "view-users"},
         )
-        self.assertEqual(self.fake.default_scopes[provisioner], {"kc-admin-api"})
+        self.assertEqual(
+            self.fake.default_scopes[provisioner], {"service_account", "basic", "kc-admin-api"}
+        )
+        self.assertEqual(self.fake.optional_scopes[provisioner], set())
+        self.assertEqual(
+            self.fake.default_scopes[self.product_uuid], {"acr", "profile", "basic", "email"}
+        )
 
     def test_second_run_changes_nothing(self) -> None:
         self.apply_once()
@@ -263,7 +370,7 @@ class ReconcileTest(unittest.TestCase):
 
     def test_service_account_keeps_least_privilege(self) -> None:
         self.apply_once()
-        provisioner = self.fake.find_client("agentes-agro-provisioner")["id"]
+        provisioner = self.client_uuid("agentes-agro-provisioner")
         key = ("users", f"service-account-{provisioner}", self.fake.realm_management)
         self.fake.mappings[key].add("manage-clients")
 
@@ -273,7 +380,7 @@ class ReconcileTest(unittest.TestCase):
 
     def test_provisioner_scope_is_kept_to_the_two_roles_it_needs(self) -> None:
         self.apply_once()
-        provisioner = self.fake.find_client("agentes-agro-provisioner")["id"]
+        provisioner = self.client_uuid("agentes-agro-provisioner")
         key = ("scope", provisioner, self.fake.realm_management)
         self.fake.mappings[key].discard("view-users")
         self.fake.mappings[key].add("manage-clients")
@@ -284,12 +391,12 @@ class ReconcileTest(unittest.TestCase):
 
     def test_provisioner_gets_the_admin_api_scope_back(self) -> None:
         self.apply_once()
-        provisioner = self.fake.find_client("agentes-agro-provisioner")["id"]
-        self.fake.default_scopes[provisioner].clear()
+        provisioner = self.client_uuid("agentes-agro-provisioner")
+        self.fake.default_scopes[provisioner].remove("kc-admin-api")
 
         reconciler, lines = reconcile(self.fake)
 
-        self.assertEqual(self.fake.default_scopes[provisioner], {"kc-admin-api"})
+        self.assertIn("kc-admin-api", self.fake.default_scopes[provisioner])
         self.assertEqual(reconciler.changes, 1)
         self.assertIn("kc-admin-api", lines[0])
 
@@ -302,7 +409,10 @@ class ReconcileTest(unittest.TestCase):
         reconciler, lines = reconcile(self.fake)
 
         client = self.fake.clients[self.product_uuid]
-        self.assertEqual(client["redirectUris"], ["http://localhost:8080/auth/callback"])
+        self.assertEqual(
+            client["redirectUris"],
+            ["http://localhost:8080/auth/callback", "http://localhost:8080/auth/login"],
+        )
         self.assertFalse(client["fullScopeAllowed"])
         self.assertEqual(self.fake.secrets[self.product_uuid], AGRO_SECRET)
         self.assertEqual(reconciler.changes, 1)
@@ -366,25 +476,8 @@ class SpecTest(unittest.TestCase):
 class ContractTest(unittest.TestCase):
     """The realm must implement the permission table the API contract documents (ADR 0015, D3)."""
 
-    ROW = re.compile(
-        r"^\s*\|\s*`(?P<permission>[a-z_.]+)`[^|]*"
-        r"\|\s*(?P<super_admin>sim|não)\s*\|\s*(?P<admin>sim|não)\s*"
-        r"\|\s*(?P<planning_operator>sim|não)\s*\|\s*$"
-    )
-
     def contract_table(self) -> dict[str, set[str]]:
-        profiles: dict[str, set[str]] = defaultdict(set)
-        found = False
-        for line in OPENAPI.read_text(encoding="utf-8").splitlines():
-            match = self.ROW.match(line)
-            if not match:
-                continue
-            found = True
-            for profile in ("super_admin", "admin", "planning_operator"):
-                if match.group(profile) == "sim":
-                    profiles[profile].add(match.group("permission"))
-        self.assertTrue(found, "permission table not found in openapi.yaml")
-        return profiles
+        return verify.load_contract(OPENAPI)
 
     def test_realm_profiles_match_the_openapi_permission_table(self) -> None:
         state = app.load_desired_state(SPEC, PLACEHOLDERS)
@@ -536,11 +629,17 @@ class AdminClientTest(unittest.TestCase):
         self.addCleanup(client.close)
         return server, client
 
+    @staticmethod
+    def found_id(client: app.AdminClient, client_id: str) -> str:
+        found = client.find_client(client_id)
+        assert found is not None
+        return str(found["id"])
+
     def test_one_connection_serves_every_request_and_carries_the_bearer_token(self) -> None:
         server, client = self.serve()
 
-        self.assertEqual(client.find_client("x")["id"], "client-1")
-        self.assertEqual(client.find_client("x")["id"], "client-1")
+        self.assertEqual(self.found_id(client, "x"), "client-1")
+        self.assertEqual(self.found_id(client, "x"), "client-1")
 
         self.assertEqual(server.connections, 1)
         self.assertEqual(server.authorizations, ["Bearer stub-access"] * 2)
@@ -548,8 +647,8 @@ class AdminClientTest(unittest.TestCase):
     def test_it_reconnects_when_the_server_drops_the_idle_connection(self) -> None:
         server, client = self.serve(drop_idle_connections=True)
 
-        self.assertEqual(client.find_client("x")["id"], "client-1")
-        self.assertEqual(client.find_client("x")["id"], "client-1")
+        self.assertEqual(self.found_id(client, "x"), "client-1")
+        self.assertEqual(self.found_id(client, "x"), "client-1")
 
         self.assertGreaterEqual(server.connections, 2)
 

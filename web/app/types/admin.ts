@@ -35,10 +35,24 @@ export interface UsersSummary {
 }
 
 export interface UserUpdateInput {
+  /** Display name (owned by the API; does not change the realm account). */
+  readonly name?: string
   readonly role?: UserRole
   readonly companyId?: string
   readonly farmScope?: FarmScope
   readonly status?: 'active' | 'inactive'
+}
+
+/**
+ * Whether the invitation e-mail left (`X-Invitation-Email`). `not_sent`: the
+ * invitation stays valid and can be resent. `unknown`: the header was not
+ * readable (e.g. CORS does not expose it), so nothing can be claimed.
+ */
+export type InvitationEmailStatus = 'sent' | 'not_sent' | 'not_needed' | 'unknown'
+
+export interface InvitationResult {
+  readonly user: UserAccount
+  readonly emailStatus: InvitationEmailStatus
 }
 
 export interface InvitationInput {

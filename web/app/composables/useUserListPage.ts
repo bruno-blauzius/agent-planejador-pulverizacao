@@ -1,5 +1,5 @@
 import { computed, onScopeDispose, ref, shallowRef, watch, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
-import type { ApiError } from '~/services/errors'
+import { hasCuratedMessage, type ApiError } from '~/services/errors'
 import type { UserAccount } from '~/types/admin'
 import type { FlashMessage } from '~/types/flash'
 import {
@@ -17,6 +17,9 @@ import {
   type UserRowActionKind,
   type UserRowView,
 } from '~/utils/userRow'
+import { invitationResentNotice } from '~/utils/invitation'
+import { useDeepLinkedRecord } from './internal/deepLink'
+import { useApiServices } from './useApiServices'
 import { useFlash } from './useFlash'
 import { usePermissions } from './usePermissions'
 import { useSession } from './useSession'
@@ -26,7 +29,15 @@ import { useUsers, useUsersSummary } from './useUsers'
 export const USER_PAGE_SIZES: readonly number[] = [10, 20, 50]
 const DEFAULT_PAGE_SIZE = 10
 
-export type UserListModal = { readonly mode: 'invite' } | { readonly mode: 'edit', readonly user: UserAccount | null }
+export type UserListModal = { readonly mode: 'invite' } | {
+  readonly mode: 'edit'
+  /** The user (listed, or fetched by id when not on the current page/filter); null while loading, not found or on a load error. */
+  readonly user: UserAccount | null
+  /** The list or the fetch by id is still running, so a missing `user` does not mean "not found" yet. */
+  readonly loading: boolean
+  /** Fetching by id failed for a reason other than 404: a load error, not "not found". */
+  readonly loadError: ApiError | null
+}
 
 export interface UserListPage {
   readonly eyebrow: ComputedRef<string | null>
@@ -75,6 +86,7 @@ function actionErrorNotice(error: ApiError | null): FlashMessage {
   if (error?.code === 'forbidden' || error?.code === 'out_of_scope') {
     return { kind: 'error', title: FORBIDDEN_MESSAGE, description: error.message }
   }
+  if (error && hasCuratedMessage(error.code)) return { kind: 'error', title: ACTION_ERROR_TITLE, description: error.message }
   if (error?.code === 'network_error') return { kind: 'error', title: ACTION_ERROR_TITLE, description: NETWORK_MESSAGE }
   if (error?.code === 'not_found') return { kind: 'error', title: ACTION_ERROR_TITLE, description: 'O usuário ou convite não existe mais.' }
   return { kind: 'error', title: ACTION_ERROR_TITLE, description: GENERIC_MESSAGE }
@@ -131,6 +143,17 @@ export function useUserListPage(options: { debounceMs?: number, now?: () => Date
     pageSize: query.value.size,
   }))
   const summary = useUsersSummary()
+
+  const { users: userService } = useApiServices()
+  const deepLink = useDeepLinkedRecord<UserAccount>({
+    id: () => {
+      const id = firstValue(route.query.user)
+      return typeof id === 'string' && id ? id : null
+    },
+    find: id => list.users.value.find(item => item.id === id) ?? null,
+    listSettled: () => !list.pending.value,
+    load: id => userService.get(id),
+  })
 
   const hasFilters = computed(() => Boolean(query.value.q) || query.value.filter !== 'all')
   const isLoaded = computed(() => !list.pending.value && !list.error.value)
@@ -191,9 +214,10 @@ export function useUserListPage(options: { debounceMs?: number, now?: () => Date
           : actionErrorNotice(actions.updateError.value)
       case 'resend_invitation':
         if (!invitationId) return actionErrorNotice(null)
-        return (await actions.resendInvitation(invitationId))
-          ? { kind: 'success', title: 'Convite reenviado', description: `Um novo e-mail foi enviado para ${account.email}.` }
-          : actionErrorNotice(actions.resendError.value)
+      {
+        const emailStatus = await actions.resendInvitation(invitationId)
+        return emailStatus ? invitationResentNotice(account.email, emailStatus) : actionErrorNotice(actions.resendError.value)
+      }
       case 'cancel_invitation':
         if (!invitationId) return actionErrorNotice(null)
         return (await actions.cancelInvitation(invitationId))
@@ -261,7 +285,8 @@ export function useUserListPage(options: { debounceMs?: number, now?: () => Date
       if (firstValue(route.query.invite) === '1') return { mode: 'invite' }
       const userId = firstValue(route.query.user)
       if (typeof userId !== 'string' || !userId) return null
-      return { mode: 'edit', user: list.users.value.find(item => item.id === userId) ?? null }
+      const { record, loading, loadError } = deepLink.resolve(userId)
+      return { mode: 'edit', user: record, loading, loadError }
     }),
     openInvite: () => openModal({ invite: '1' }),
     closeModal: () => replaceQuery({ invite: undefined, user: undefined }, false),
@@ -269,6 +294,7 @@ export function useUserListPage(options: { debounceMs?: number, now?: () => Date
       const message = flash.consume()
       if (!message) return null
       highlightId.value = message.highlightId ?? null
+      notice.value = message
       void refreshAll()
       return message
     },

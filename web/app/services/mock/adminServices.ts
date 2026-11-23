@@ -8,7 +8,7 @@ import type { CompanyService, DashboardService, ProfileService, UserService } fr
 import type { Company, UserAccount } from '~/types/admin'
 import type { FarmScope, Permission, UserRole } from '~/types/auth'
 import type { Dashboard, UpcomingWindow } from '~/types/dashboard'
-import type { Profile } from '~/types/profile'
+import type { PasswordChangeInput, Profile } from '~/types/profile'
 import { canSeeFarm, farmAccess, type Viewer } from './access'
 import type { CompanyRecord, MockSeed, UserRecord } from './seed'
 import { digitsOf, fail, failIfInvalid, normalize, paginate, roundOneDecimal } from './support'
@@ -33,6 +33,8 @@ export function createAdminMockServices(ctx: AdminMockContext): {
   companies: CompanyService
   profile: ProfileService
   dashboard: DashboardService
+  /** Dev-mock only: surfaced as `auth.changePassword` (the real password belongs to Keycloak). */
+  changePassword: (input: PasswordChangeInput) => Promise<void>
 } {
   const { db, now, nextId, authorized, currentViewer } = ctx
 
@@ -105,6 +107,18 @@ export function createAdminMockServices(ctx: AdminMockContext): {
         }
       }, 'users.manage')
     },
+    get(userId) {
+      return authorized(() => toUserAccount(findManagedUser(item => item.id === userId, 'usuário não encontrado')), 'users.manage')
+    },
+    remove(userId) {
+      return authorized(() => {
+        const record = findManagedUser(item => item.id === userId, 'usuário não encontrado')
+        checkAssignment(undefined, undefined, record)
+        if (record.id === currentViewer().id) fail('forbidden', 'você não pode excluir a própria conta')
+        if (record.status === 'invited') fail('invitation_pending', 'usuário com convite pendente; cancele o convite')
+        db.users.splice(db.users.indexOf(record), 1)
+      }, 'users.manage')
+    },
     update(userId, input) {
       return authorized(() => {
         const record = findManagedUser(item => item.id === userId, 'usuário não encontrado')
@@ -114,11 +128,13 @@ export function createAdminMockServices(ctx: AdminMockContext): {
         }
         const companyId = input.companyId ?? record.companyId
         const details: FieldError[] = []
+        if (input.name !== undefined && !input.name.trim()) details.push({ field: 'name', message: 'informe o nome' })
         if (!db.companies.some(item => item.id === companyId)) details.push({ field: 'company_id', message: 'empresa não encontrada' })
         validateScope(input.farmScope, companyId, details)
         if (input.status && record.status === 'invited') details.push({ field: 'status', message: 'convite pendente; reenvie ou cancele o convite' })
         failIfInvalid(details)
         Object.assign(record, {
+          name: input.name?.trim() ?? record.name,
           role: input.role ?? record.role,
           companyId,
           farmScope: input.farmScope ?? (input.companyId && input.companyId !== record.companyId ? { mode: 'all' } : record.farmScope),
@@ -136,7 +152,8 @@ export function createAdminMockServices(ctx: AdminMockContext): {
         if (!db.companies.some(item => item.id === input.companyId)) details.push({ field: 'company_id', message: 'empresa não encontrada' })
         validateScope(input.farmScope, input.companyId, details)
         failIfInvalid(details)
-        if (db.users.some(item => normalize(item.email) === normalize(input.email))) fail('conflict', 'e-mail já cadastrado')
+        if (db.users.some(item => normalize(item.email) === normalize(input.email))) fail('email_already_registered', 'e-mail já cadastrado')
+        if (db.companies.find(item => item.id === input.companyId)?.status === 'inactive') fail('company_inactive', 'a empresa está inativa')
         const record: UserRecord = {
           id: nextId('user'),
           name: input.name.trim(),
@@ -153,13 +170,14 @@ export function createAdminMockServices(ctx: AdminMockContext): {
           passwordChangedAt: null,
         }
         db.users.push(record)
-        return toUserAccount(record)
+        return { user: toUserAccount(record), emailStatus: 'sent' as const }
       }, 'users.manage')
     },
     resendInvitation(invitationId) {
       return authorized(() => {
         const record = findManagedUser(item => item.invitation?.id === invitationId, 'convite não encontrado')
         record.invitation = { id: invitationId, expiresAt: new Date(now().getTime() + INVITATION_DAYS * DAY_MS) }
+        return 'sent' as const
       }, 'users.manage')
     },
     cancelInvitation(invitationId) {
@@ -234,6 +252,18 @@ export function createAdminMockServices(ctx: AdminMockContext): {
         }
       }, 'companies.manage')
     },
+    get(companyId) {
+      return authorized(() => toCompany(findClientCompany(companyId)), 'companies.manage')
+    },
+    remove(companyId) {
+      return authorized(() => {
+        const record = findClientCompany(companyId)
+        if (db.users.some(item => item.companyId === record.id && item.status !== 'inactive')) {
+          fail('company_has_active_users', 'a empresa ainda tem usuários ativos ou convidados')
+        }
+        db.companies.splice(db.companies.indexOf(record), 1)
+      }, 'companies.manage')
+    },
     create(input) {
       return authorized(() => {
         const document = validateCompany(input, null) ?? ''
@@ -260,12 +290,27 @@ export function createAdminMockServices(ctx: AdminMockContext): {
       return authorized(() => {
         const record = findClientCompany(companyId)
         validateCompany(input, companyId)
+        if (Object.keys(input).length === 0) fail('validation_failed', 'dados inválidos', [{ field: 'name', message: 'informe ao menos um campo' }])
+        const plan = input.plan ?? record.plan
+        let status = input.status ?? record.status
+        let trialEndsAt = record.trialEndsAt
+        // Contract: changing the plan to trial starts the evaluation; leaving it ends it.
+        if (input.plan === 'trial' && record.plan !== 'trial') {
+          trialEndsAt = new Date(now().getTime() + TRIAL_DAYS * DAY_MS)
+          if (input.status === undefined && record.status !== 'inactive') status = 'trial'
+        }
+        else if (input.plan && input.plan !== 'trial' && record.plan === 'trial') {
+          trialEndsAt = null
+          if (input.status === undefined && record.status === 'trial') status = 'active'
+        }
+        if (status === 'trial' && !trialEndsAt) fail('validation_failed', 'dados inválidos', [{ field: 'status', message: 'a avaliação precisa de data de término' }])
         Object.assign(record, {
           name: input.name?.trim() ?? record.name,
           city: input.city?.trim() ?? record.city,
           state: input.state?.trim().toUpperCase() ?? record.state,
-          plan: input.plan ?? record.plan,
-          status: input.status ?? record.status,
+          plan,
+          status,
+          trialEndsAt,
         })
         return toCompany(record)
       }, 'companies.manage')
@@ -298,20 +343,21 @@ export function createAdminMockServices(ctx: AdminMockContext): {
         return toProfile(record)
       })
     },
-    changePassword(input) {
-      return authorized(() => {
-        const record = ctx.currentUserRecord()
-        const details: FieldError[] = []
-        if (record.password !== input.currentPassword) details.push({ field: 'current_password', message: 'senha atual incorreta' })
-        const next = input.newPassword
-        if (next.length < PASSWORD_MIN_LENGTH || !/[a-zA-Z]/.test(next) || !/\d/.test(next)) {
-          details.push({ field: 'new_password', message: 'use ao menos 8 caracteres, com letras e números' })
-        }
-        failIfInvalid(details)
-        record.password = next
-        record.passwordChangedAt = now()
-      })
-    },
+  }
+
+  function changePassword(input: PasswordChangeInput): Promise<void> {
+    return authorized(() => {
+      const record = ctx.currentUserRecord()
+      const details: FieldError[] = []
+      if (record.password !== input.currentPassword) details.push({ field: 'current_password', message: 'senha atual incorreta' })
+      const next = input.newPassword
+      if (next.length < PASSWORD_MIN_LENGTH || !/[a-zA-Z]/.test(next) || !/\d/.test(next)) {
+        details.push({ field: 'new_password', message: 'use ao menos 8 caracteres, com letras e números' })
+      }
+      failIfInvalid(details)
+      record.password = next
+      record.passwordChangedAt = now()
+    })
   }
 
   // ---- dashboard ----------------------------------------------------------
@@ -407,5 +453,5 @@ export function createAdminMockServices(ctx: AdminMockContext): {
     }
   }
 
-  return { users, companies, profile, dashboard }
+  return { users, companies, profile, dashboard, changePassword }
 }

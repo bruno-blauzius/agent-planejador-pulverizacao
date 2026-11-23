@@ -51,7 +51,7 @@ repos:
     hooks:
       - id: bandit
         args: ["-c", "bandit.yaml", "-q"]
-        files: '^services/.*\.py$'
+        files: '^(services|infra)/.*\.py$'
 
   # --- Dependências vulneráveis -------------------------------------------
   # Usam rede; rodam só quando o arquivo de dependências muda e antes do push.
@@ -64,6 +64,23 @@ repos:
         entry: bash -c 'for f in "$@"; do pip-audit --strict -r "$f" || exit 1; done' --
         files: '(^|/)requirements[^/]*\.txt$'
         stages: [pre-commit, pre-push]
+
+      # --- Keycloak (infra/keycloak) ---------------------------------------
+      # Testes do script de aplicação (sem rede) e tipos estritos; só quando algo
+      # da pasta muda. O alvo `make keycloak-test` roda o mesmo comando.
+      - id: keycloak-test
+        name: keycloak-test (testes do script de aplicação no Keycloak)
+        language: system
+        entry: uv run --no-project python -m unittest discover -s infra/keycloak/tests -t infra/keycloak
+        files: '^infra/keycloak/.*\.(py|json)$|^services/api/api/openapi\.yaml$'
+        pass_filenames: false
+
+      - id: keycloak-mypy
+        name: mypy --strict (infra/keycloak)
+        language: system
+        entry: uv run --no-project --with mypy mypy --strict infra/keycloak
+        files: '^infra/keycloak/.*\.py$'
+        pass_filenames: false
 
       # --- Go -------------------------------------------------------------
       # Executam a partir de services/api (onde ficará o go.mod).

@@ -6,6 +6,7 @@ import { toOwnerRowView, type OwnerRowView } from '~/utils/ownerRow'
 import { useFlash } from './useFlash'
 import { useOwners } from './useOwners'
 import { usePermissions } from './usePermissions'
+import { useSession } from './useSession'
 
 export type OwnerPersonFilter = 'all' | PersonType
 export type OwnerModalStep = 'data' | 'links'
@@ -135,6 +136,7 @@ export function useOwnerListPage(options: { debounceMs?: number } = {}): OwnerLi
   })
 
   const permissions = usePermissions()
+  const session = useSession()
   const canWrite = computed(() => permissions.can('registry.write'))
   const requestedOwner = computed(() => {
     const owner = firstValue(route.query.owner)
@@ -142,8 +144,8 @@ export function useOwnerListPage(options: { debounceMs?: number } = {}): OwnerLi
   })
 
   // Only once the session is known (role loaded), so a slow /auth/me never strips a valid link.
-  watch([canWrite, () => permissions.role.value, requestedOwner], ([allowed, role, owner]) => {
-    if (role && !allowed && owner) replaceQuery({ owner: undefined, step: undefined }, false)
+  watch([canWrite, () => session.isAuthenticated.value, requestedOwner], ([allowed, signedIn, owner]) => {
+    if (signedIn && !allowed && owner) replaceQuery({ owner: undefined, step: undefined }, false)
   }, { immediate: true })
 
   function openModal(owner: string, step?: OwnerModalStep) {

@@ -5,8 +5,8 @@ import { resolveAuthRedirect, safeRedirect } from '~/utils/redirect'
 describe('validateLoginForm', () => {
   it.each([
     ['bruno@fazendasantarita.com.br', true],
-    ['123.278.916-05', true],
-    ['12327891605', true],
+    ['123.278.916-05', false],
+    ['12327891605', false],
     ['  bruno@x.test  ', true],
     ['bruno@', false],
     ['123.278.916', false],
@@ -42,6 +42,11 @@ describe('safeRedirect', () => {
     ['//evil.test'],
     ['/\\evil.test'],
     ['\\\\evil.test'],
+    ['/.//evil.test'],
+    ['/a/..//evil.test'],
+    ['/%2e//evil.test'],
+    ['/%2E//evil.test'],
+    ['/./\\evil.test'],
     ['javascript:alert(1)'],
     ['/\tevil'],
     [' /farms'],

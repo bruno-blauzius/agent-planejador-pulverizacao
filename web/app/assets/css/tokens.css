@@ -146,6 +146,9 @@
   --size-icon-tile-lg: 48px;
   --size-avatar-sm: 32px;
   --size-avatar-md: 38px;
+  --size-avatar-lg: 40px;
+  /* Max height of the farm checkbox list in the user access modal before it scrolls. */
+  --user-access-farm-list-max-height: 176px;
   /* Profile identity (Figma 54:904) and its photo badge. */
   --size-avatar-xl: 120px;
   --profile-identity-width: 340px;
@@ -281,8 +284,19 @@
   --user-table-company-width: 210px;
   --user-table-access-width: 160px;
   --user-table-status-width: 170px;
+  /* Applications list (Figma 63:237) and detail side sheet (63:890). */
+  --application-table-date-width: 140px;
+  --application-table-field-width: 240px;
+  --application-table-product-width: 190px;
+  --application-table-area-width: 100px;
+  --application-table-conditions-width: 170px;
+  --application-table-operator-width: 130px;
+  --application-table-status-width: 140px;
+  --application-sheet-width: 520px;
+  --application-filter-select-height: 40px;
+  --application-skeleton-height: 200px;
   /* Companies table columns (Figma 52:966). */
-  --company-table-document-width: 170px;
+  --company-table-document-width: 190px;
   --company-table-plan-width: 120px;
   --company-table-count-width: 90px;
   --company-table-status-width: 170px;
@@ -295,4 +309,62 @@
   --size-chart-bar-sm: 6px;
   --size-chart-swatch: 12px;
   --radius-chart-bar: 3px;
+}
+
+/* Spray planner (Figma 18:2, 19:8, 20:18). */
+:root {
+  --radius-card-xl: 24px;
+  /* Chat bubbles: 18 px corners, 6 px on the corner that points at the sender. */
+  --radius-bubble: 18px;
+  --radius-bubble-tail: 6px;
+  --radius-planner-hour: 7px;
+  /* Agent answers (Figma 18:152): 14 px text on a 22 px line, taller than body-md. */
+  --planner-answer-line-height: 22px;
+  --planner-chat-width: 440px;
+  --planner-bubble-user-max-width: 332px;
+  /* Mobile frame of the dev showcase (Figma 20:18). */
+  --planner-phone-width: 390px;
+  /* Figma 20: "Pode pulverizar" breaks in two lines at 42 px. */
+  --planner-now-headline-max-width: 10ch;
+  --size-planner-code-tile: 44px;
+  --size-planner-trace-icon: 28px;
+  --size-planner-tile-icon: 34px;
+  --size-planner-check-badge: 24px;
+  --size-planner-status-badge: 20px;
+  --size-planner-metric-icon: 30px;
+  /* Window map (Figma 18:204): cells, row label and the width below which it scrolls. */
+  --size-planner-cell: 36px;
+  --size-planner-row-label: 44px;
+  --planner-map-cell-gap: 3px;
+  --planner-map-min-width: 520px;
+  --planner-skeleton-map-height: 160px;
+  --planner-skeleton-chart-height: 240px;
+  --planner-skeleton-plan-height: 200px;
+  /* Loading skeleton of the mobile "Hoje" (heights of the Figma 20:18 blocks). */
+  --planner-skeleton-now-height: 220px;
+  --planner-skeleton-tile-height: 112px;
+  --planner-skeleton-strip-height: 110px;
+  --planner-skeleton-task-height: 172px;
+  --size-planner-header-action: 42px;
+  /* Hourly conditions chart (Figma 18:347). */
+  --planner-chart-axis-width: 30px;
+  --planner-chart-plot-top: 10px;
+  --planner-chart-plot-height: 136px;
+  --planner-chart-x-axis-height: 24px;
+  --planner-chart-bar-width: 12px;
+  --planner-chart-line-width: 2.5px;
+  --size-planner-chart-dot: 8px;
+  --size-planner-chart-legend-line: 14px;
+  --size-planner-chart-legend-line-height: 4px;
+  /* Mobile "Hoje" (Figma 20:18). */
+  --size-planner-hour-cell: 34px;
+  --planner-hour-selected-border: 2.5px;
+  --size-planner-fab: 52px;
+  --radius-planner-fab: 18px;
+  --planner-nav-padding-bottom: 26px;
+  --size-planner-progress: 10px;
+  --color-planner-wind-bar: color-mix(in srgb, var(--color-coffee-600) 45%, transparent);
+  --color-planner-chip-border: color-mix(in srgb, var(--color-green-700) 40%, transparent);
+  --color-planner-track: color-mix(in srgb, var(--color-white) 12%, transparent);
+  --color-planner-outline-inverse: color-mix(in srgb, var(--color-white) 25%, transparent);
 }

@@ -1,7 +1,7 @@
 /** HTTP adapters of the ports, against services/api (api/openapi.yaml). */
 import type {
   ApiServices,
-  AuthService,
+  SsoAuthService,
   CropService,
   FarmService,
   FieldService,
@@ -13,7 +13,6 @@ import type {
   FarmSummaryDto,
   FieldDto,
   ItemsDto,
-  LoginResponseDto,
   OwnerDto,
   OwnerFarmLinkDto,
   OwnerSummaryDto,
@@ -29,13 +28,17 @@ import {
   createUserHttpService,
 } from './adminServices'
 import {
-  toAuthSession,
+  createApplicationHttpService,
+  createPlannerHttpService,
+  createTodayHttpService,
+  createWeatherHttpService,
+} from './plannerServices'
+import {
   toFarm,
   toFarmInputDto,
   toFarmSummary,
   toField,
   toFieldInputDto,
-  toLoginRequestDto,
   toOwner,
   toOwnerFarmLink,
   toOwnerFarmLinkInputDto,
@@ -48,14 +51,28 @@ import {
 
 const segment = encodeURIComponent
 
-export function createAuthHttpService(http: HttpClient): AuthService {
+/** Joins the API base URL and a path without doubling or dropping the slash. */
+function absoluteUrl(baseURL: string, path: string): string {
+  return `${baseURL.replace(/\/+$/, '')}${path}`
+}
+
+/**
+ * Session by the SSO Inceres (ADR 0015). Login is a browser redirect handled
+ * by the API (`GET /auth/login`, answers 302 to Keycloak); the session is the
+ * HttpOnly `agro_session` cookie, so the front never handles a token.
+ * `POST /auth/login` and `POST /me/password` are obsolete and never called.
+ */
+export function createAuthHttpService(http: HttpClient, baseURL: string): SsoAuthService {
   return {
-    async login(credentials) {
-      const dto = await http<LoginResponseDto>('/auth/login', { method: 'POST', body: toLoginRequestDto(credentials) })
-      return toAuthSession(dto)
+    kind: 'sso',
+    loginUrl(returnTo) {
+      return absoluteUrl(baseURL, `/auth/login?return_to=${encodeURIComponent(returnTo)}`)
     },
     async getCurrentUser() {
       return toUser(await http<UserDto>('/auth/me'))
+    },
+    async logout() {
+      await http<unknown>('/auth/logout', { method: 'POST' })
     },
   }
 }
@@ -161,9 +178,10 @@ export function createOwnerHttpService(http: HttpClient): OwnerService {
   }
 }
 
-export function createHttpServices(http: HttpClient): ApiServices {
+/** `baseURL` is the browser-facing API address: the login redirect leaves the app, so it must be public. */
+export function createHttpServices(http: HttpClient, baseURL: string): ApiServices {
   return {
-    auth: createAuthHttpService(http),
+    auth: createAuthHttpService(http, baseURL),
     farms: createFarmHttpService(http),
     fields: createFieldHttpService(http),
     crops: createCropHttpService(http),
@@ -172,5 +190,9 @@ export function createHttpServices(http: HttpClient): ApiServices {
     companies: createCompanyHttpService(http),
     profile: createProfileHttpService(http),
     dashboard: createDashboardHttpService(http),
+    planner: createPlannerHttpService(http),
+    applications: createApplicationHttpService(http),
+    today: createTodayHttpService(http),
+    weather: createWeatherHttpService(http),
   }
 }

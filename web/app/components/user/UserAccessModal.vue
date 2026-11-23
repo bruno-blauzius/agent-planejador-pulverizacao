@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { UserAccount } from '~/types/admin'
+import type { UserListModal } from '~/composables/useUserListPage'
 import type { UserRole } from '~/types/auth'
 import type { FarmScopeMode } from '~/utils/userAccessForm'
 
@@ -11,7 +11,7 @@ import type { FarmScopeMode } from '~/utils/userAccessForm'
  * POST + novalidate + submit.prevent: personal data never goes to the URL.
  */
 const props = defineProps<{
-  modal: { readonly mode: 'invite' } | { readonly mode: 'edit', readonly user: UserAccount | null }
+  modal: UserListModal
 }>()
 
 const emit = defineEmits<{
@@ -19,7 +19,8 @@ const emit = defineEmits<{
 }>()
 
 const editedUser = computed(() => (props.modal.mode === 'edit' ? props.modal.user : null))
-const isMissingUser = computed(() => props.modal.mode === 'edit' && props.modal.user === null)
+const isLoadingUser = computed(() => props.modal.mode === 'edit' && props.modal.user === null && props.modal.loading)
+const isMissingUser = computed(() => props.modal.mode === 'edit' && props.modal.user === null && !props.modal.loading)
 
 const {
   texts,
@@ -31,6 +32,7 @@ const {
   scopeOptions,
   scopeLocked,
   farmOptions,
+  farmsUnavailable,
   fieldErrors,
   formError,
   touch,
@@ -73,7 +75,11 @@ function toggleFarm(id: string, selected: boolean) {
   touch('farmIds')
 }
 
+/** Single exit path: BaseModal's own close (X, Esc, overlay), Cancel and a saved form all end here, once. */
+let closed = false
 function close() {
+  if (closed) return
+  closed = true
   open.value = false
   emit('close')
 }
@@ -87,12 +93,16 @@ async function onSubmit() {
   <BaseModal
     v-model:open="open"
     :eyebrow="texts.eyebrow"
-    :title="isMissingUser ? 'Editar acesso' : texts.title"
-    :description="isMissingUser ? undefined : texts.description"
+    :title="isMissingUser || isLoadingUser ? 'Editar acesso' : texts.title"
+    :description="isMissingUser || isLoadingUser ? undefined : texts.description"
     icon="mail"
-    @close="emit('close')"
+    @close="close"
   >
-    <p v-if="isMissingUser" class="user-access__missing text-body-md">
+    <div v-if="isLoadingUser" class="user-access__skeleton" aria-busy="true" aria-label="Carregando usuário">
+      <div v-for="index in 4" :key="index" class="user-access__skeleton-row" />
+    </div>
+
+    <p v-else-if="isMissingUser" class="user-access__missing text-body-md">
       Usuário não encontrado nesta página. Volte para a lista e abra o menu do usuário de novo.
     </p>
 
@@ -153,11 +163,14 @@ async function onSubmit() {
           :disabled="scopeLocked"
         />
       </div>
+      <p v-if="farmsUnavailable && !scopeLocked && values.farmScopeMode !== 'selected'" class="user-access__hint text-body-sm">
+        Fazendas ainda não disponíveis: o acesso vale para todas da empresa.
+      </p>
 
       <fieldset v-if="!scopeLocked && values.farmScopeMode === 'selected'" class="user-access__farms">
         <legend class="user-access__farms-legend text-label-field">Fazendas desta pessoa</legend>
         <p v-if="!farmOptions.length" class="user-access__hint text-body-sm">
-          {{ pending ? 'Carregando fazendas…' : 'Nenhuma fazenda cadastrada nesta empresa.' }}
+          {{ pending ? 'Carregando fazendas…' : farmsUnavailable ? 'Fazendas ainda não disponíveis.' : 'Nenhuma fazenda cadastrada nesta empresa.' }}
         </p>
         <div v-else class="user-access__farm-list">
           <BaseCheckbox
@@ -192,7 +205,7 @@ async function onSubmit() {
     <template #actions>
       <BaseButton variant="secondary" block @click="close">Cancelar</BaseButton>
       <BaseButton
-        v-if="!isMissingUser"
+        v-if="!isMissingUser && !isLoadingUser"
         type="submit"
         :form="formId"
         block
@@ -239,12 +252,40 @@ async function onSubmit() {
 
 .user-access__farm-list {
   display: grid;
+  max-height: var(--user-access-farm-list-max-height);
+  padding-right: var(--space-4);
+  overflow-y: auto;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-8) var(--space-16);
 }
 
 .user-access__error {
   color: var(--color-status-unsuitable);
+}
+
+.user-access__skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-20);
+}
+
+.user-access__skeleton-row {
+  height: var(--size-control-lg);
+  border-radius: var(--radius-md);
+  background: var(--color-sand);
+  animation: user-access-pulse var(--duration-skeleton) var(--easing-standard) infinite;
+}
+
+@keyframes user-access-pulse {
+  50% {
+    opacity: var(--opacity-skeleton-dim);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-access__skeleton-row {
+    animation: none;
+  }
 }
 
 .user-access__hint,

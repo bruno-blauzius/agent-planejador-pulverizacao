@@ -18,6 +18,7 @@ const {
   newPassword,
   confirmPassword,
   passwordHint,
+  passwordManagement,
   passwordChangedLabel,
   fieldErrors,
   touch,
@@ -101,6 +102,7 @@ async function onSubmit() {
           v-model:current-password="currentPassword"
           v-model:new-password="newPassword"
           v-model:confirm-password="confirmPassword"
+          :managed-url="passwordManagement.kind === 'sso' ? passwordManagement.accountUrl : null"
           :last-changed-label="passwordChangedLabel"
           :new-password-hint="passwordHint"
           :errors="fieldErrors"

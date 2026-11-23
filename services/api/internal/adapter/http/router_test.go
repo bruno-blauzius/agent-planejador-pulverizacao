@@ -208,6 +208,9 @@ func TestCORS(t *testing.T) {
 			if (gotMethods != "") != tt.wantPreflight {
 				t.Errorf("Access-Control-Allow-Methods = %q, preflight headers expected: %v", gotMethods, tt.wantPreflight)
 			}
+			if tt.wantAllowOrigin != "" && response.Header().Get("Access-Control-Expose-Headers") != "X-Request-Id, X-Invitation-Email" {
+				t.Errorf("Access-Control-Expose-Headers = %q, want X-Request-Id and X-Invitation-Email", response.Header().Get("Access-Control-Expose-Headers"))
+			}
 			if tt.wantPreflight && response.Header().Get("X-Request-Id") == "" {
 				t.Error("preflight response must carry the request id")
 			}

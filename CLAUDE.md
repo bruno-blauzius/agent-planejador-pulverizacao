@@ -14,7 +14,7 @@ Monorepo de estudo de agentes de IA para o agro, mantido por um arquiteto de sof
 - `docs/projetos/` — o problema, as fases e a definição de pronto de cada agente
 - `docs/adr/` — decisões arquiteturais (ADRs 0007–0015 cobrem pre-commit, API Go, Docker/Postgres, contrato-primeiro no front, Vuetify, MapLibre, empresas/papéis, PostGIS+pgvector e identidade de usuários com o SSO Inceres (Keycloak))
 - `docs/arquitetura/` — probes de Kubernetes e o DER da API (`der-api.md`)
-- **Infra compartilhada fora deste repositório:** `C:\Projetos\Inceres\infra-docker` (não é git; sobe com `./up.sh`) hospeda Kafka, RabbitMQ, Redis e o **Keycloak** (SSO Inceres, realm `inceres`, `http://localhost:8180`; `http://keycloak:8080` na rede `inceres-infra`) com o banco dedicado `db-keycloak`. Este repositório não sobe Keycloak nem banco dele.
+- **Infra compartilhada fora deste repositório:** `C:\Projetos\Inceres\infra-docker` (não é git; sobe com `./up.sh`) hospeda Kafka, RabbitMQ, Redis, o **Kong** (API gateway, `http://localhost:8100`, `http://kong:8000` na rede; rotas deste produto em `kong/kong.yml` de lá: `/agro/api`, `/agro/spray-planner` e `/agro/label-advisor`; o front não passa pelo gateway) e o **Keycloak** (SSO Inceres, realm `inceres`, `http://localhost:8180`; `http://keycloak:8080` na rede `inceres-infra`) com o banco dedicado `db-keycloak`. Este repositório não sobe Keycloak nem banco dele.
 - `docs/dominio/` — regras do domínio (ex.: condições de pulverização)
 - `.claude/` — skills, subagentes e comandos do projeto (ver "Skills, agentes e comandos do projeto")
 
@@ -99,7 +99,8 @@ Vale para `services/api` e `services/label-advisor`. Detalhes e justificativas n
 - Componentes de apresentação recebem props e emitem eventos; lógica reutilizável vai para `composables/`.
 - O front fala **apenas** com `services/api`. Nunca chame os serviços Python diretamente.
 - Biblioteca de componentes: **Vuetify**, tematizada para o design do Figma (ADR 0011). Mapas: **MapLibre GL JS** (ADR 0012).
-- Contrato primeiro (ADR 0010): enquanto a API não implementa um endpoint, o front usa serviços em memória (`NUXT_PUBLIC_API_MOCK=true`) que seguem o `openapi.yaml`. Endpoint que falta no contrato é apontado, não inventado.
+- Contrato primeiro (ADR 0010): enquanto a API não implementa um endpoint, o front usa serviços em memória que seguem o `openapi.yaml` (`NUXT_PUBLIC_API_MOCK=true` troca tudo; `NUXT_PUBLIC_API_MOCK_PENDING=true` usa a API real e o mock só nos endpoints ainda `planned`; ambos só em build de desenvolvimento). Endpoint que falta no contrato é apontado, não inventado.
+- **Sessão e login (ADR 0015):** o login é um redirecionamento do navegador para `GET {apiBase}/auth/login?return_to=<rota>` (Keycloak); a sessão é o cookie `HttpOnly` `agro_session` da API, que o JavaScript nunca lê. O front não guarda token nem manda `Authorization`: as chamadas usam `credentials: 'include'` e o SSR repassa o `cookie` da requisição. `GET /auth/me` restaura o usuário (401 vai para `/login`; 403 `user_not_provisioned`, `no_access_to_product`, `ambiguous_role` ou `forbidden` vai para `/login?error=<código>`, sem laço de redirecionamento). Logout é `POST /auth/logout`. A senha é do Keycloak: não há tela de senha nem troca de senha no front (o Perfil aponta para a conta do SSO). O formulário de senha e o token só existem no mock (`useAuthToken`, só `NUXT_PUBLIC_API_MOCK=true`). Abra o front em `http://localhost:3000` (não `127.0.0.1`): o cookie é do host da API e só viaja same-site.
 - **Autorização é da API; o front só apresenta (ADR 0013).** Menus, botões e rotas verificam **capacidades** (`can('users.manage')`, via composable único), nunca o nome do papel. Esconder um botão não é segurança.
 
 ---
@@ -156,6 +157,7 @@ make audit    # CVEs no uv.lock de cada serviço Python
 make keycloak        # aplica no Keycloak do infra-docker (realm inceres) o client, as roles e os grupos do produto; gera os segredos que faltarem no .env
 make keycloak-check  # só compara com infra/keycloak/agentes-agro.json; sai com 1 se divergir
 make keycloak-test   # testes do script de aplicação (sem rede)
+make api-test-keycloak  # integração do adaptador Keycloak da API contra o Keycloak local (conta .test criada e apagada; lê o .env; exige make keycloak)
 ```
 
 Serviços Python (dentro de `services/spray-planner` ou `services/label-advisor`):
@@ -175,12 +177,33 @@ API Go (`services/api`):
 
 ```bash
 go test ./...
+go test -tags integration ./internal/adapter/postgres/...   # exige banco; use make api-test-integration
 golangci-lint run
-sqlc generate
+go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate   # ou make api-sqlc
 go run ./cmd/api
 ```
 
-> `golang-migrate`, `pgx` e `sqlc` entram na Fase 3 da API (ADR 0008). Ao introduzi-los, crie os alvos de migração no `Makefile` e documente-os aqui.
+Migrações da API (golang-migrate roda em container `migrate/migrate`, sem dependência no `go.mod`):
+
+```bash
+make migrate-up        # aplica no banco api do Postgres local, com api_migrator (senha do .env)
+make migrate-down      # desfaz UMA migração (nunca -all por make)
+make migrate-version
+make db-test           # Postgres descartável: up, down, up, constraints, tenant e privilégios do api_app
+```
+
+Adaptador Postgres da API (`internal/adapter/postgres`: pgx v5 + sqlc; SQL em `queries/*.sql`, código gerado em `sqlcgen/` é versionado):
+
+```bash
+make api-test               # testes unitários da API (sem banco)
+make api-test-integration   # adaptador Postgres em banco descartável, com o papel api_app (build tag `integration`)
+make api-sqlc               # regera o sqlcgen (sqlc fixado em SQLC_VERSION no Makefile); rode após mexer em queries/ ou migrações
+make api-sqlc-check         # falha se o sqlcgen divergir (útil no CI)
+```
+
+`api-test-integration` (`services/api/scripts/integration-test.sh`) sobe um container temporário com nome e porta únicos (biblioteca `scripts/lib/disposable-db.sh`, a mesma do `db-test`), aplica as migrações, roda `go test -tags integration` e remove o container ao final, mesmo em falha; nunca toca no `agro-postgres` nem no `db-keycloak`. Os testes pedem `API_TEST_DATABASE_URL` (o script define). Conexão do serviço: `API_DATABASE_URL` (papel `api_app`; a senha nunca vai para log) e `API_DB_MAX_CONNS`, `API_DB_MIN_CONNS`, `API_DB_MAX_CONN_LIFETIME`, `API_DB_MAX_CONN_IDLE_TIME`, `API_DB_HEALTH_CHECK_PERIOD`, `API_DB_CONNECT_TIMEOUT`, `API_DB_STATEMENT_TIMEOUT`, `API_SESSION_TOUCH_INTERVAL` (`platform.LoadDatabaseConfig`).
+
+> O PostGIS precisa existir no banco `api` antes da migração `000004`; em volume criado antes do ADR 0014 o init não roda, então crie como superusuário: `CREATE EXTENSION postgis;`.
 
 Banco local (o `agro-postgres` do compose, acessível só em `127.0.0.1`):
 
@@ -194,7 +217,8 @@ Front (`web`):
 ```bash
 pnpm install
 pnpm dev
-NUXT_PUBLIC_API_MOCK=true pnpm dev   # serviços em memória enquanto a API não implementa os endpoints (ADR 0010)
+NUXT_PUBLIC_API_MOCK_PENDING=true pnpm dev   # sessão, usuários, convites, empresas e perfil na API real; o resto (planned) no mock (ADR 0010, 0015)
+NUXT_PUBLIC_API_MOCK=true pnpm dev   # tudo em memória, com formulário de senha, para trabalhar sem a API
 pnpm test
 pnpm lint
 pnpm typecheck

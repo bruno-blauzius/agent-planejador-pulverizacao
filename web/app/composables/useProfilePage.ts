@@ -2,6 +2,7 @@ import { computed, reactive, readonly, ref, shallowRef, watch } from 'vue'
 import type { ApiError } from '~/services/errors'
 import type { Profile } from '~/types/profile'
 import {
+  DEFAULT_ACCOUNT_URL,
   PROFILE_MESSAGES,
   passwordChangedLabel,
   passwordRules,
@@ -15,6 +16,11 @@ import {
 import { useAction, useResource } from './internal/resource'
 import { useApiServices } from './useApiServices'
 import { useSession } from './useSession'
+
+/** Where the password is changed: in the form (dev mock) or on the Keycloak account page (real API). */
+export type PasswordManagement =
+  | { readonly kind: 'local' }
+  | { readonly kind: 'sso', readonly accountUrl: string }
 
 export interface UseProfilePageOptions {
   now?: () => Date
@@ -33,16 +39,27 @@ const PROFILE_FIELDS: readonly ProfileField[] = ['name', 'currentPassword', 'new
  * Profile screen (11): identity card, personal data (name only; e-mail, role
  * and company are managed by an administrator) and password change, saved by
  * one "Salvar alterações". Any role can open it.
+ *
+ * The password belongs to Keycloak (ADR 0015): against the real API there is no
+ * password form, `passwordManagement` carries the link to the account page of
+ * the SSO instead. Only the dev mock still changes a password in the form.
  */
 export function useProfilePage(options: UseProfilePageOptions = {}) {
-  const { profile: profileService } = useApiServices()
+  const { profile: profileService, auth } = useApiServices()
+  const passwordAuth = auth.kind === 'password' ? auth : null
   const session = useSession()
   const now = options.now ?? (() => new Date())
 
   const resource = useResource<Profile | null>('profile:me', () => profileService.get(), () => null)
   const updateAction = useAction((name: string) => profileService.update({ name }))
-  const passwordAction = useAction((currentPassword: string, newPassword: string) =>
-    profileService.changePassword({ currentPassword, newPassword }))
+  // Reached only with the dev mock: `wantsPasswordChange` below is ignored for the SSO flavour.
+  const passwordAction = useAction(async (currentPassword: string, newPassword: string) => {
+    await passwordAuth?.changePassword({ currentPassword, newPassword })
+  })
+  const passwordManagement: PasswordManagement = passwordAuth
+    ? { kind: 'local' }
+    : { kind: 'sso', accountUrl: String(useRuntimeConfig().public.accountUrl || '') || DEFAULT_ACCOUNT_URL }
+  const hasPasswordForm = passwordManagement.kind === 'local'
 
   /** What the user typed; null = untouched, so the field shows the loaded name. */
   const nameDraft = ref<string | null>(null)
@@ -84,7 +101,7 @@ export function useProfilePage(options: UseProfilePageOptions = {}) {
   })
 
   const nameChanged = computed(() => Boolean(loaded.value) && name.value.trim() !== loaded.value?.name)
-  const isDirty = computed(() => nameChanged.value || wantsPasswordChange(passwordValues.value))
+  const isDirty = computed(() => nameChanged.value || (hasPasswordForm && wantsPasswordChange(passwordValues.value)))
 
   // Editing hides the API errors and the general error of the last attempt.
   watch([name, currentPassword, newPassword, confirmPassword], () => {
@@ -154,7 +171,7 @@ export function useProfilePage(options: UseProfilePageOptions = {}) {
     if (Object.keys(localErrors.value).length > 0) return false
 
     const changeName = nameChanged.value
-    const changePassword = wantsPasswordChange(passwordValues.value)
+    const changePassword = hasPasswordForm && wantsPasswordChange(passwordValues.value)
     saving.value = true
     notice.value = null
     try {
@@ -190,6 +207,7 @@ export function useProfilePage(options: UseProfilePageOptions = {}) {
     currentPassword,
     newPassword,
     confirmPassword,
+    passwordManagement,
     passwordRules: computed(() => passwordRules(newPassword.value)),
     passwordHint: PROFILE_MESSAGES.passwordHint,
     passwordChangedLabel: computed(() => passwordChangedLabel(loaded.value?.passwordChangedAt ?? null, now())),

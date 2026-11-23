@@ -332,7 +332,7 @@ describe('useFarmWizard — draft restore and logout', () => {
     await nextTick()
     expect(storage.value).not.toBeNull()
 
-    useSession().logout()
+    await useSession().logout()
 
     expect(storage.value).toBeNull()
     expect(wizard.identification.value.name).toBe('')

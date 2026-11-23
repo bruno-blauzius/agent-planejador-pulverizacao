@@ -159,11 +159,11 @@ Dev server único compartilhado em http://localhost:3002 (config `web-mock`); n�
 
 | # | Tela | node-id | Depende de | Status | Veredito | Observações |
 |---|---|---|---|---|---|---|
-| 11 | Perfil do usuário | 54:815 | Fundação P3 | 🔎 em revisão (trilha F) | — | Identidade, dados pessoais, senha |
-| 12 | Usuários (super admin) | 52:215 | Fundação P3 | 🔧 em andamento (trilha E) | — | Tabela com chips de filtro e paginação |
-| 13 | Convidar usuário — modal | 52:538 | 12 | 🔧 em andamento (trilha E) | — | Campos, cartões de opção (papel), selects |
-| 14 | Empresas (super admin) | 52:851 | Fundação P3 | 🔧 em andamento (trilha F) | — | 4 cartões de indicador + tabela paginada |
-| 15 | Painel (administrador) | 54:535 | Fundação P3 | 🔧 em andamento (trilha F) | — | Indicadores, janelas × aplicações, próximas janelas, alertas do agente, atividade recente; seletor (fazenda/período?) |
+| 11 | Perfil do usuário | 54:815 | Fundação P3 | ✅ aprovada | 🟢 (ressalvas só 🟢: tipagem errors em ProfilePersonal/PasswordSection, largura do help text, defaults duplicados em ProfileIdentityCard/PasswordSection, touched.delete redundante) | Identidade, dados pessoais, senha |
+| 12 | Usuários (super admin) | 52:215 | Fundação P3 | ✅ aprovada | 🟢 (ciclo 2; ressalvas só 🟢: título duplicado e flag closed em UserAccessModal) | Tabela com chips de filtro e paginação |
+| 13 | Convidar usuário — modal | 52:538 | 12 | ✅ aprovada | 🟢 (ciclo 2; ressalvas só 🟢: título duplicado e flag closed em UserAccessModal) | Campos, cartões de opção (papel), selects |
+| 14 | Empresas (super admin) | 52:851 | Fundação P3 | ✅ aprovada | 🟢 (ciclo 2, sem achados novos; não verificado: visão de operador, 1440px dedicado, erros de rede só por testes) | 4 cartões de indicador + tabela paginada |
+| 15 | Painel (administrador) | 54:535 | Fundação P3 | ✅ aprovada | 🟢 (ciclo 2, sem achados novos; não verificado: visão de operador, 1440px dedicado, erros de rede só por testes) | Indicadores, janelas × aplicações, próximas janelas, alertas do agente, atividade recente; seletor (fazenda/período?) |
 
 ## Fundação P3 (proposta)
 
@@ -187,3 +187,48 @@ Dev server único compartilhado em http://localhost:3002 (config `web-mock`); n�
 Mesmas regras de arquivos compartilhados, dev server único e sem `pnpm build` da seção anterior. Contratos em `.claude/contratos/tela-NN.md`.
 - Telas 12/13: "Exportar" usuários desabilitado (sem endpoint); admin não vê chip/cartão "Super admin"; último acesso relativo ("há N h" até 3 h, depois "hoje, HH:mm"); edição de acesso reaproveita o modal de convite; fazendas liberadas em multisseleção; super admin com empresa travada na operadora. Modal de proprietário não abre sem registry.write (sem visualização só leitura por ora).
 - Telas 11/14/15: foto do perfil "Em breve"; rótulo de papel neutro; "Nova empresa" desabilitado "Em breve" e menu "…" de empresa omitido (sem frame); operadora fora da lista de empresas; Painel com período fixo de 14 dias, alertas dispensáveis só na sessão, links para o Planejador "Em breve"; datas em America/Sao_Paulo.
+
+## Registro P3 (ciclo final)
+- Permissões nas telas aprovadas (ADR 0013): aprovado no ciclo 2 (403/out_of_scope na tela de Fazenda corrigido; useOwnerListPage usa isAuthenticated). 🟢: faltam testes de regressão de componentes (DataTable clickable, FieldMapPopover editable, NOTICE_TIMEOUT_MS), pois Vitest roda em node sem mount.
+- Telas 12/13: divergências assumidas: avatar lg 40px (Proprietários mantém md 38); fazendas liberadas = lista de checkboxes (BaseSelect sem multiple; Figma só tem select simples); coluna Empresa mantida para admin (🟢 poderia ocultar).
+- Telas 14/15: UI pronta, em revisão. Divergências: "Nova empresa" desabilitado "Em breve"; menu "…" omitido; busca não existe no Figma; "Abrir o Planejador" desabilitado; gráfico CSS sem lib; blocos em coluna única <1200px.
+- Pendências transversais: sidebar em 375px aperta conteúdo (shell); sem tratamento global de 401; rota /planner inexistente.
+
+---
+# Página 02 · Planejador de Pulverização (nó 1:5) — inventário (2026-11-22, aguardando confirmação)
+
+| # | Tela | node-id | Depende de | Status | Veredito | Observações |
+|---|---|---|---|---|---|---|
+| 16 | Planejador de pulverização (chat do agente + plano sugerido + mapa de janelas 5 dias + condições hora a hora) | 18:2 | Fundação P1/P3 | ✅ aprovada | 🟢 (revisão final ciclo 2) | Desktop 1440. Rota `/planner`. Contexto Fazenda/Talhões/Produto, conversa, "O agente consultou", plano por talhão, mapa de janelas, gráfico Delta T/vento |
+| 17 | Confirmação humana antes de registrar (modal sobre a tela 16) | 19:8 | 16 | ✅ aprovada | 🟢 (revisão final ciclo 2) | Talhão, janela, produto, volume de calda, 6 checagens, operador/equipamento, checkbox "Revisei…" |
+| 18 | Mobile · Operador (Hoje) | 20:18 | 16 | ✅ aprovada | 🟢 (revisão final ciclo 2) | 390x844. "Pode pulverizar", Delta T/vento/chuva, linha do dia, tarefa de hoje, "Iniciar aplicação", abas Hoje/Mapa/Aplicações/Perfil |
+
+Compartilhados já existentes: AppSidebar (link Planejador já no menu), BaseModal, StatusBadge, MapView/MapLegend, ToastAlert, OptionCard, DataTable.
+Compartilhados novos prováveis: bolha de chat/entrada, cartão de plano por talhão, mapa de janelas (grade hora × dia), gráfico de condições, lista de checagens, navegação inferior mobile.
+Dados/endpoints novos (todos planned + mock, ADR 0010): conversa com o agente (mensagem → resposta + plano + fontes consultadas), previsão/janelas por fazenda, registro de aplicação (só após confirmação humana), tarefa do dia do operador.
+Pontos que exigem decisão: ADR do protocolo de chat/plano (contrato), `/planner` ainda inexistente (hoje "Em breve"), mobile como rota própria ou layout responsivo, chat sem LLM (mock determinístico).
+- CONFIRMADO pelo usuário (2026-11-22): inventário 16,17,18; chat com mock determinístico. Mobile: rota própria /today (padrão assumido, não respondido). ADR 0016 (protocolo planner) como proposto; pedir aprovação na pausa.
+- Fundação P2 (ADR 0016 proposto, contrato planned, mocks, composables, 17+ componentes planner): ✅ aprovada com ressalvas 🟢 (ciclo 2). 🟢: JSDoc duplicado em useApplicationConfirmation:150; reset do chat não zera delivery.pending (erro de requisição antiga pode aparecer); id de entrada user-N por tamanho de lista; fidelidade visual com Figma ainda a checar no navegador.
+- Tela 16 em andamento (UI /planner).
+
+## Página 02 — telas adicionais (descobertas em 2026-11-22; o Figma foi atualizado)
+| # | Tela | node-id | Depende de | Status | Veredito | Observações |
+|---|---|---|---|---|---|---|
+| 19 | Aplicações (histórico e planejadas) — `/applications` | 63:237 | Fundação P2 (tela 17 registra) | ✅ aprovada | 🟢 (revisão final ciclo 2) | Filtros Período/Talhão/Produto/Operador; tabela DATA·JANELA, TALHÃO, PRODUTO·DOSE, ÁREA, CONDIÇÕES, OPERADOR, STATUS (Planejada/Concluída/Cancelada); "Previsão ao vivo" nas planejadas; contexto clima no topo (Guaxupé · 24 °C) |
+| 20 | Aplicação · detalhe (painel lateral 520px sobre a lista) | 63:627 (painel 63:890) | 19 | ✅ aprovada | 🟢 (revisão final ciclo 2) | Registrada em…, condições registradas (Delta T, vento, chuva 8h, duração), produto e calda (lote, dose, calda, carência), equipe e equipamento, confirmado por, assinatura digital |
+Decisão do usuário: construir ("estão sim"). Contrato planned + mock (ADR 0016 estendido), item de menu "Aplicações" passa a ter rota.
+
+## Registro P2 (final)
+- Telas 16–20 aprovadas com ressalvas 🟢. Pendências 🟢: teste do hint "Seu perfil não pode registrar" e do startedNotice; esconder "Baixar registro (PDF)" no painel 404/403; ordenar talhões do seletor do planner; mapa de janelas com role=img (não tabela); decisão em aberto do ADR 0016 (summary: mês corrente vs período do filtro; applications.confirm/aprovação; timeout 60 s; operador/equipamento sem cadastro).
+- Divergências P2: botão "Iniciar aplicação"/lg 56px vs 60; "Ajustar horários" e abas Mapa/Perfil(Perfil→/profile) sem endpoint; gráfico polyline e dois eixos; seletor de contexto em modal (Figma só chips); modal com seletor de talhão; chip de clima no cabeçalho (não na topbar); coluna "…" por linha omitida; avatar 32px vs 24; "Cancelada" vermelha (contrato diz muted); sem blur de fundo no modal.
+- ADR 0016 aprovado pelo usuário em 2026-11-22 (decisões em aberto listadas no ADR seguem pendentes).
+
+## Fase B do front — sessão real (2026-11-22)
+- Login por redirecionamento ao Keycloak (`/login` sem senha na API real), sessão por cookie `HttpOnly`, middleware com `GET /auth/me` e erros 401/403 honestos, logout `POST /auth/logout`, usuários/convites/empresas/perfil nos adaptadores HTTP reais. Detalhes e lacunas em `docs/adr/0015-identidade-de-usuarios-e-keycloak.md` (Fase B).
+- Mudanças visuais (mínimas): `/login` (botão "Entrar com o login Inceres" no lugar do formulário, rótulo "E-mail", aviso de acesso negado); Perfil (seção de senha vira link para a conta do SSO); `BaseButton` ganhou `href`. Aviso de convite criado sem e-mail usa o tom de atenção do toast.
+- Pendente de decisão visual: não existe botão "Sair" em nenhuma tela (o logout está pronto em `useSession().logout()`).
+
+## Tela 14 (Empresas) — UI de escrita ligada (2026-11-22)
+- Ligados à lógica (`useCompanyListPage`/`useCompanyForm`): botão "Nova empresa" (`openCreate`), coluna de ações com menu "…", confirmação de Inativar/Excluir (erro dentro do diálogo), modal Nova/Editar empresa (CNPJ travado, carregando/não encontrada no deep link `?company=<id>`), toast flutuante do `notice`, linha destacada. Componentes: `components/company/CompanyRowActions.vue`, `CompanyConfirmDialog.vue`, `CompanyFormModal.vue`.
+- PENDÊNCIA DE DESIGN: a página 03 do Figma (MeWDfQIHok0s80GbqCKGV3) só tem os frames Usuários, Convidar usuário (modal), Empresas, Painel e Perfil. Modal Nova/Editar empresa, menu "…" da linha e confirmações de Inativar/Excluir não têm frame; foram derivados dos padrões de Usuários (UserAccessModal, UserRowActions, UserConfirmDialog; TextField, SegmentedControl para o plano, ToastAlert). Pedir os frames ao design e ajustar se divergirem.
+- Sem testes de componente: Vitest roda em node, sem mount (padrão do projeto). Verificação visual no navegador pendente.

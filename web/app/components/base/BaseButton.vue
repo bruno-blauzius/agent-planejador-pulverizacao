@@ -26,6 +26,8 @@ const props = withDefaults(
     block?: boolean
     /** Renders a NuxtLink instead of a <button>. */
     to?: string
+    /** Renders a plain <a href> for a destination outside the app (e.g. the SSO login or account page). */
+    href?: string
     /** Why the action is unavailable; renders the button disabled but focusable. */
     unavailableHint?: string
   }>(),
@@ -38,6 +40,7 @@ const props = withDefaults(
     loading: false,
     block: false,
     to: undefined,
+    href: undefined,
     unavailableHint: undefined,
   },
 )
@@ -76,7 +79,8 @@ function onClick(event: MouseEvent) {
   <v-btn
     :class="classes"
     :to="to && !isInactive ? to : undefined"
-    :type="to ? undefined : type"
+    :href="href && !isInactive ? href : undefined"
+    :type="to || href ? undefined : type"
     :disabled="isInactive && !isUnavailable"
     :aria-disabled="isUnavailable || undefined"
     :title="unavailableHint"

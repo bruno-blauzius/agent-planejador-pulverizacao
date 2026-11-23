@@ -2,11 +2,16 @@
 /**
  * Login (Figma 6:16, form 6:76). Presentation only: state, validation, the
  * request and the post-login redirect live in useLoginForm.
+ * Real API (ADR 0015): no password here; the button leaves for the SSO Inceres
+ * login. The e-mail/password form is the dev mock only.
  */
 definePageMeta({ layout: 'auth', public: true })
 useHead({ title: 'Entrar · Agentes Agro' })
 
 const {
+  kind,
+  ssoUrl,
+  accessError,
   identifier,
   password,
   rememberMe,
@@ -29,12 +34,29 @@ const isForgotPasswordOpen = ref(false)
       </p>
     </header>
 
+    <ToastAlert
+      v-if="accessError"
+      tone="error"
+      :title="accessError.title"
+      :message="accessError.message"
+      :dismissible="false"
+    />
+
+    <div v-if="kind === 'sso'" class="login__sso">
+      <BaseButton size="lg-compact" block :href="ssoUrl ?? undefined">
+        Entrar com o login Inceres
+      </BaseButton>
+      <p class="login__caption text-body-sm">
+        Você vai para a página de login da Inceres e volta para o Agentes Agro em seguida.
+      </p>
+    </div>
+
     <!-- method="post": a submit before hydration must never put the password in the URL. -->
-    <form class="login__form" method="post" novalidate @submit.prevent="submit()">
+    <form v-else class="login__form" method="post" novalidate @submit.prevent="submit()">
       <div class="login__fields">
         <TextField
           v-model="identifier"
-          label="E-mail ou CPF"
+          label="E-mail"
           name="identifier"
           placeholder="voce@fazenda.com.br"
           autocomplete="username"
@@ -135,6 +157,12 @@ const isForgotPasswordOpen = ref(false)
   display: flex;
   flex-direction: column;
   gap: var(--space-28);
+}
+
+.login__sso {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
 }
 
 .login__fields {

@@ -15,9 +15,8 @@ import type {
 } from '~/types/dashboard'
 import { formatHectares, initials } from './format'
 import { SPRAY_CONDITION_LABELS } from './labels'
+import { DISPLAY_TIME_ZONE } from './timeZone'
 
-/** Farm local time of the current customers (pending: per-farm time zone from the API). */
-export const DISPLAY_TIME_ZONE = 'America/Sao_Paulo'
 export const DASHBOARD_PERIOD_DAYS = 14
 
 const PLACEHOLDER = '—'
@@ -157,7 +156,8 @@ export function buildDashboardChart(days: readonly DashboardDay[], summary: stri
   const maxApplications = Math.max(0, ...days.map(day => day.applications))
   const middle = Math.floor((days.length - 1) / 2)
   return {
-    title: `Janelas aptas × aplicações · últimos ${days.length} dias`,
+    // The period is fixed (14 days): the title must not depend on what has loaded.
+    title: `Janelas aptas × aplicações · últimos ${DASHBOARD_PERIOD_DAYS} dias`,
     legend: [{ key: 'hours', label: 'Horas aptas' }, { key: 'applications', label: 'Aplicações' }],
     days: days.map((day, index) => ({
       date: day.date,
@@ -168,7 +168,8 @@ export function buildDashboardChart(days: readonly DashboardDay[], summary: stri
       ariaLabel: `${dayLabel(day.date)}: ${integer.format(day.suitableHours)} h aptas, ${day.applications === 1 ? '1 aplicação' : `${integer.format(day.applications)} aplicações`}`,
     })),
     summary,
-    isEmpty: maxHours === 0 && maxApplications === 0,
+    // Only loaded days can be "empty"; no days means loading or failure, not zero activity.
+    isEmpty: days.length > 0 && maxHours === 0 && maxApplications === 0,
   }
 }
 

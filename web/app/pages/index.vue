@@ -20,6 +20,8 @@ const {
   error,
   isForbidden,
   isOutOfScope,
+  isLoaded,
+  showAllFarms,
   refresh,
   statCards,
   chart,
@@ -38,13 +40,19 @@ const farmItems = computed<SelectItem[]>(() =>
 )
 
 const farmSelection = computed<string | null>({
-  get: () => selectedFarmId.value ?? ALL_FARMS,
+  // A farm that is not among the options (invalid or out of scope) shows no selection.
+  get: () => {
+    const value = selectedFarmId.value ?? ALL_FARMS
+    return farmItems.value.some((item) => item.value === value) ? value : null
+  },
   set: (value) => {
     selectedFarmId.value = !value || value === ALL_FARMS ? null : value
   },
 })
 
-const isFirstLoad = computed(() => pending.value && chart.value.days.length === 0)
+/** Blocks get "loading" until the data arrives and "failed" when it did not. */
+const isBlockPending = computed(() => pending.value && !isLoaded.value)
+const isBlockFailed = computed(() => !pending.value && !isLoaded.value)
 </script>
 
 <template>
@@ -66,10 +74,14 @@ const isFirstLoad = computed(() => pending.value && chart.value.days.length === 
       <ToastAlert
         v-if="isOutOfScope"
         tone="attention"
-        title="Fazenda fora do seu escopo"
-        message="Você não tem acesso a essa fazenda. Mostrando todas as fazendas liberadas para você."
+        title="Fazenda indisponível"
+        message="Essa fazenda não existe ou não está liberada para você, então o painel não foi carregado."
         :dismissible="false"
-      />
+      >
+        <template #actions>
+          <BaseButton variant="secondary" size="sm" @click="showAllFarms()">Ver todas as fazendas</BaseButton>
+        </template>
+      </ToastAlert>
       <ToastAlert
         v-else-if="error"
         tone="error"
@@ -82,7 +94,7 @@ const isFirstLoad = computed(() => pending.value && chart.value.days.length === 
         </template>
       </ToastAlert>
 
-      <section class="dashboard__stats" aria-label="Indicadores" :aria-busy="isFirstLoad || undefined">
+      <section class="dashboard__stats" aria-label="Indicadores" :aria-busy="isBlockPending || undefined">
         <StatCard
           v-for="card in statCards"
           :key="card.key"
@@ -94,18 +106,20 @@ const isFirstLoad = computed(() => pending.value && chart.value.days.length === 
       </section>
 
       <div class="dashboard__row">
-        <DashboardWindowsChart :chart="chart" />
+        <DashboardWindowsChart :chart="chart" :pending="isBlockPending" :failed="isBlockFailed" />
         <DashboardUpcomingWindows
           class="dashboard__side"
           :windows="upcomingWindows"
           :show-see-all="canOpenPlanner"
           :see-all-unavailable-hint="PLANNER_HINT"
+          :pending="isBlockPending"
+          :failed="isBlockFailed"
         />
       </div>
 
       <div class="dashboard__row">
-        <DashboardAgentAlerts :alerts="alerts" @dismiss="dismissAlert" />
-        <DashboardActivity class="dashboard__side" :activity="activity" />
+        <DashboardAgentAlerts :alerts="alerts" :pending="isBlockPending" :failed="isBlockFailed" @dismiss="dismissAlert" />
+        <DashboardActivity class="dashboard__side" :activity="activity" :pending="isBlockPending" :failed="isBlockFailed" />
       </div>
     </template>
   </div>

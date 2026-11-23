@@ -68,7 +68,6 @@ const SECTIONS: readonly NavSection[] = [
     items: [
       { label: 'Painel', to: '/', icon: 'home', permission: 'dashboard.view' },
       { label: 'Fazendas', to: '/farms', icon: 'map' },
-      { label: 'Áreas e talhões', to: '/fields', icon: 'layers' },
       { label: 'Proprietários', to: '/owners', icon: 'users' },
       { label: 'Planejador', to: '/planner', icon: 'sprout', badge: 'IA' },
       { label: 'Aplicações', to: '/applications', icon: 'calendar' },

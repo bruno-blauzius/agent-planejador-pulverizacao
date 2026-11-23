@@ -8,7 +8,7 @@
 import type { FieldError } from '../errors'
 import type {
   ApiServices,
-  AuthService,
+  PasswordAuthService,
   CropService,
   FarmService,
   FieldService,
@@ -20,6 +20,8 @@ import type { Owner, OwnerFarmLink, OwnerFarmLinkInput, OwnerInput, OwnerSummary
 import type { Permission, User } from '~/types/auth'
 import { ROLE_PERMISSIONS, canSeeFarm, farmAccess, type Viewer } from './access'
 import { createAdminMockServices } from './adminServices'
+import { createApplicationHistoryMockServices, createApplicationStore } from './applicationServices'
+import { createPlannerMockServices, type PlannerFaults } from './plannerServices'
 import { approximateAreaHa, approximateCentroid } from './geometry'
 import { createSeed, type FarmRecord, type MockSeed, type OwnerRecord, type UserRecord } from './seed'
 import { digitsOf, fail, failIfInvalid, normalize, paginate, roundOneDecimal } from './support'
@@ -31,6 +33,8 @@ export interface MockServicesOptions {
   /** Defaults to a fresh `createSeed()`. */
   readonly seed?: MockSeed
   readonly now?: () => Date
+  /** Mutable switches to exercise the planner's honest-error states (agent/weather down, stale review). */
+  readonly plannerFaults?: PlannerFaults
 }
 
 const MAX_PERIMETER_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -46,7 +50,10 @@ const PERIMETER_FORMATS = {
   zip: 'shapefile',
 } as const
 
-export function createMockServices(options: MockServicesOptions): ApiServices {
+/** The mock is always the password flavour, so tests can call `api.auth.login` without narrowing. */
+export type MockApiServices = Omit<ApiServices, 'auth'> & { readonly auth: PasswordAuthService }
+
+export function createMockServices(options: MockServicesOptions): MockApiServices {
   const db = options.seed ?? createSeed()
   const now = options.now ?? (() => new Date())
   let sequence = 0
@@ -506,14 +513,13 @@ export function createMockServices(options: MockServicesOptions): ApiServices {
 
   // ---- auth --------------------------------------------------------------
 
-  const auth: AuthService = {
+  const auth: PasswordAuthService = {
+    kind: 'password',
     login(credentials) {
       return respond(() => {
         const identifier = normalize(credentials.identifier)
-        const digits = digitsOf(identifier)
-        const isCpf = /^[\d.\-\s]+$/.test(identifier) && digits.length === 11
-        const record = db.users.find(item => isCpf ? item.document === digits : normalize(item.email) === identifier)
-        if (!record?.password || record.password !== credentials.password) fail('unauthorized', 'e-mail/CPF ou senha inválidos')
+        const record = db.users.find(item => normalize(item.email) === identifier)
+        if (!record?.password || record.password !== credentials.password) fail('unauthorized', 'e-mail ou senha inválidos')
         if (record.status !== 'active') fail('unauthorized', 'acesso desativado; fale com o administrador da sua empresa')
         record.lastAccessAt = now()
         const lifetimeMs = credentials.rememberMe ? REMEMBER_ME_DAYS * 86_400_000 : SESSION_HOURS * 3_600_000
@@ -527,16 +533,39 @@ export function createMockServices(options: MockServicesOptions): ApiServices {
     getCurrentUser() {
       return respond(() => toUser(requireUserRecord()))
     },
+    // The token lives in the front's cookie; the session clears it. Nothing to revoke here.
+    logout() {
+      return respond(() => undefined)
+    },
+    changePassword(input) {
+      return changePassword(input)
+    },
   }
 
-  const admin = createAdminMockServices({
+  const adminContext = {
     db,
     now,
     nextId,
     authorized,
     currentViewer,
     currentUserRecord: () => db.users.find(item => item.id === currentViewer().id) ?? fail('unauthorized', 'sessão expirada ou inválida'),
-  })
+  }
+  const { changePassword, ...admin } = createAdminMockServices(adminContext)
+  // One store: what the planner registers after the human confirmation is what the list shows.
+  const applicationStore = createApplicationStore(now)
+  const planner = createPlannerMockServices(adminContext, applicationStore, options.plannerFaults)
+  const history = createApplicationHistoryMockServices(adminContext, applicationStore, options.plannerFaults)
 
-  return { auth, farms, fields, crops, owners, ...admin }
+  return {
+    auth,
+    farms,
+    fields,
+    crops,
+    owners,
+    ...admin,
+    planner: planner.planner,
+    applications: { ...planner.applications, ...history.applications },
+    today: planner.today,
+    weather: history.weather,
+  }
 }

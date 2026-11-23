@@ -8,12 +8,17 @@ export type PasswordField = 'currentPassword' | 'newPassword' | 'confirmPassword
 
 withDefaults(
   defineProps<{
+    /**
+     * Account page of the SSO (ADR 0015). When set, the password is not changed
+     * here: the section only points to that page and shows no fields.
+     */
+    managedUrl?: string | null
     /** "Última alteração: há 3 meses"; hidden when unknown. */
     lastChangedLabel?: string | null
     newPasswordHint?: string
     errors?: Partial<Record<string, string>>
   }>(),
-  { lastChangedLabel: null, newPasswordHint: 'Mínimo de 8 caracteres, com letras e números.', errors: () => ({}) },
+  { managedUrl: null, lastChangedLabel: null, newPasswordHint: 'Mínimo de 8 caracteres, com letras e números.', errors: () => ({}) },
 )
 
 const currentPassword = defineModel<string>('currentPassword', { required: true })
@@ -35,7 +40,17 @@ const titleId = useId()
       <p v-if="lastChangedLabel" class="profile-password__meta text-body-sm">{{ lastChangedLabel }}</p>
     </header>
 
+    <template v-if="managedUrl">
+      <p class="profile-password__text text-body-md">
+        Sua senha é a da conta Inceres, usada em todos os produtos. Para trocá-la, abra a página da sua conta.
+      </p>
+      <div>
+        <BaseButton variant="secondary" :href="managedUrl">Trocar senha na conta Inceres</BaseButton>
+      </div>
+    </template>
+
     <TextField
+      v-else
       v-model="currentPassword"
       label="Senha atual"
       name="currentPassword"
@@ -45,7 +60,7 @@ const titleId = useId()
       @blur="emit('touch', 'currentPassword')"
     />
 
-    <div class="profile-password__row">
+    <div v-if="!managedUrl" class="profile-password__row">
       <TextField
         v-model="newPassword"
         label="Nova senha"
@@ -100,6 +115,11 @@ const titleId = useId()
 .profile-password__meta {
   margin: 0;
   color: var(--color-text-tertiary);
+}
+
+.profile-password__text {
+  margin: 0;
+  color: var(--color-text-secondary);
 }
 
 .profile-password__row {
