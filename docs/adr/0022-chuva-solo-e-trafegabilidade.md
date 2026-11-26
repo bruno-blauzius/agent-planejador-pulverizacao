@@ -74,7 +74,7 @@ Há duas leituras da mesma chuva que não podem se misturar:
 
 1. ~~Bloqueio desde o início ou só alerta~~ Decidido na fase 2: bloqueia desde o início (adendo abaixo).
 2. ~~Vínculo talhão ↔ pluviômetro~~ Decidido na fase 2: vínculo explícito (adendo abaixo).
-3. Histórico de estados calculados (`soil_state_history`) para comparar com atolamentos reais (fase 4).
+3. ~~Histórico de estados calculados~~ Gravado diariamente em `soil_state_history` (adendo da fase 4); falta a rota de leitura e a comparação com atolamentos reais.
 4. Cadastro de equipamentos da fazenda, com limite do fabricante e exigência de solo por máquina.
 5. Lacunas entre o frame 04f e o contrato, deixadas fora da tela para não derivar dado no front: o card "Previsão 5 dias" (total e pico do período; propor `forecast_total_mm` e `forecast_peak` na resposta), a linha "Tráfego terrestre: Bloqueado" (propor um campo `ground_traffic` vindo do domínio), a tabela só com métodos cadastrados (depende da pendência 4) e a classe de relevo por método na tabela. Os rótulos de veredito do Figma ("Indicado", "Possível · barro", "Inapto · sem tráfego") diferem dos usados ("Apto", "Atenção", "Inapto"): decidir qual vale.
 
@@ -92,6 +92,13 @@ Decisões aprovadas pelo usuário para a fase 2 (só o back; as telas de lançam
 8. **Open-Meteo na API.** Porta `WeatherProvider` no `usecase`; adaptador HTTP com `past_days=7`, chuva horária e diária, `soil_moisture_0_to_1cm` a `9_to_27cm` (média ponderada pela espessura) e fuso `America/Sao_Paulo`. A coordenada enviada é o centroide do talhão **arredondado a 0,01°** (cerca de 1 km, menor que a célula do modelo): reduz o que sai da empresa para um terceiro e serve de chave de cache. Cache em memória por célula e dia, com validade `API_WEATHER_CACHE_TTL` (1 h), montado na raiz de composição. Falha da Open-Meteo não inventa valor: com pluviômetro, o estado sai da medida e a projeção some (`weather_unavailable`); sem pluviômetro, o estado é `unknown`. Testes com respostas gravadas, nunca a rede.
 9. **Auditoria.** Cadastro de pluviômetro, perfil de solo, leitura e vistoria vão para `audit_events`.
 
+## Adendo 2026-11-26 (fase 4, parte sem o agente: histórico e observabilidade)
+
+Decisões aprovadas pelo usuário:
+
+1. **Histórico por executor diário, não no GET.** A rota de trafegabilidade continua só leitura (o agente a consome). Um executor em segundo plano na própria API, no padrão do executor de relevo, roda uma vez por dia local (hora configurável) e grava, para cada talhão de cada empresa, o veredito do dia calculado pelo **mesmo** caso de uso do GET. Tabela `soil_state_history` com `company_id NOT NULL`, um registro por talhão e dia local (`UNIQUE`; reexecução ou várias instâncias não duplicam), com estado, base, fonte da chuva, chuva de 48 e 72 h, umidade do modelo, textura e origem dos limites. Serve para comparar com atolamentos reais e recalibrar; não há rota de leitura até haver uso (pendência 3 resolvida em parte).
+2. **Observabilidade por logs estruturados, sem dependência nova.** Eventos `slog` com nomes e campos estáveis: `weather.unavailable` (falha da Open-Meteo, só a causa, nunca a coordenada) e, ao fim de cada execução do executor, `soil_history.run` com o total de talhões, gravados, sem fonte de chuva, sem textura, com clima indisponível e falhas. O alerta fica no agregador de logs. Prometheus ou OpenTelemetry exigiriam ADR próprio.
+
 ## Estado da implementação (2026-11-26)
 
 - **Fase 0:** contrato da rota e dos schemas no `openapi.yaml` (`planned`).
@@ -103,4 +110,12 @@ Decisões aprovadas pelo usuário para a fase 2 (só o back; as telas de lançam
   3. Sem a Open-Meteo, `days` traz só hoje e as liberações são calculadas só com hoje.
   4. Leituras e vistorias não se editam nem apagam (o `api_app` não tem `UPDATE`/`DELETE` nelas); corrigir uma leitura exige uma rota nova.
   5. `PUT .../soil-profile` exige as duas chaves (`null` limpa), para um cliente não apagar o vínculo por omissão.
-- **Fora deste recorte:** telas de lançamento (pluviômetro, leitura, vistoria, perfil de solo); agente (fase 3, depende de `FindSprayWindows`); operação (fase 4).
+- **Fase 4, parte sem o agente:** migração `000024` (`soil_state_history`, `UNIQUE (company_id, field_id, local_day)`, FK composta com `farm_id`, `CHECK` dos enums e da coerência fonte × chuva; `api_app` só `INSERT` e `SELECT`). O núcleo do `GetFieldTrafficability` virou `usecase.TrafficabilityEvaluator` (sem checagem de ator); a rota o chama depois de checar o escopo e o executor diário `SoilHistoryWorker` o chama para cada talhão, então os dois gravam e respondem o mesmo veredito. O executor roda uma vez por dia local a partir de `API_SOIL_HISTORY_HOUR` (padrão 7), percorre as empresas ativas e em avaliação e, em cada uma, os talhões não removidos de fazendas não removidas (toda consulta com `company_id`), pula os que já têm registro do dia e grava os demais com `ON CONFLICT DO NOTHING`, com concorrência e prazo por talhão configuráveis. Logs `weather.unavailable` (adaptador Open-Meteo) e `soil_history.run`; falha de um talhão sai em `soil_history.field_failed` e não interrompe a execução.
+- **Decisões da fase 4 além do adendo:**
+  1. O registro guarda só o veredito de hoje; o executor pede ao núcleo o menor horizonte (1 dia de projeção).
+  2. O dia gravado é o dia local da própria avaliação (`as_of`), não o do início da execução: uma execução que cruza a meia-noite grava cada veredito no dia que ele descreve.
+  3. Execução com talhão em falha é refeita nas próximas checagens do mesmo dia, avaliando só os talhões que faltam, no máximo 3 vezes por dia; execução cortada pelo desligamento não conta.
+  4. Várias instâncias: cada uma pula os talhões já gravados (consulta barata pelo índice único) e o `ON CONFLICT DO NOTHING` resolve a corrida restante; não há trava distribuída, então duas instâncias no mesmo minuto podem avaliar o mesmo talhão duas vezes (o primeiro registro fica).
+  5. Empresas `trial` entram no histórico junto com as `active`; `inactive` e removidas, não.
+  6. As contagens `no_rain_source`, `no_soil_texture` e `weather_unavailable` contam os talhões avaliados nesta execução (gravados ou já gravados por outra instância), não os pulados.
+- **Fora deste recorte:** telas de lançamento (pluviômetro, leitura, vistoria, perfil de solo); rota de leitura do histórico e comparação com atolamentos; agente (fase 3, depende de `FindSprayWindows`).

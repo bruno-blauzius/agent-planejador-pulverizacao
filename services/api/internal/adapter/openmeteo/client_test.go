@@ -159,8 +159,8 @@ func TestWeatherFailuresAreUnavailable(t *testing.T) {
 					t.Errorf("the coordinate or the URL leaked (%q): err %q, logs %q", leak, err, logs)
 				}
 			}
-			if !strings.Contains(logs.String(), "weather provider unavailable") {
-				t.Errorf("the failure must be logged: %q", logs)
+			if !strings.Contains(logs.String(), "msg=weather.unavailable") {
+				t.Errorf("the failure must be logged as weather.unavailable: %q", logs)
 			}
 		})
 	}

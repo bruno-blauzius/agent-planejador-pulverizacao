@@ -117,6 +117,9 @@ func (c appConfig) logValue() slog.Value {
 			slog.Duration("weather_cache_ttl", c.Trafficability.Weather.CacheTTL),
 			slog.Duration("gauge_max_staleness", c.Trafficability.GaugeMaxStaleness),
 			slog.Duration("inspection_validity", c.Trafficability.InspectionValidity),
+			slog.Bool("history_enabled", c.Trafficability.History.Enabled),
+			slog.Int("history_hour", c.Trafficability.History.Hour),
+			slog.Int("history_concurrency", c.Trafficability.History.Concurrency),
 		),
 	)
 }

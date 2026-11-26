@@ -442,6 +442,10 @@ PK em `field_id` (no máximo um pluviômetro por talhão). FKs compostas `(compa
 
 Uma linha por `soil_texture` e `effective_from` (`UNIQUE`); vale a mais recente com vigência até o dia local. Limites de chuva em 48 h (`rain_48h_dry_mm` < `rain_48h_ideal_mm` < `rain_48h_moist_mm`), de umidade em % da capacidade de campo (`moisture_*_pct`, crescentes), `rain_72h_factor` (`>= 1`), `drying_rate_mm_per_day` (`> 0`), `field_capacity_m3m3` (capacidade de campo de referência, `> 0` e `<= 1`; a Open-Meteo não a fornece) e `source` (`heuristic`, `calibrated`). Semeada pela migração com os valores heurísticos do ADR 0022. `api_app` só lê; calibrar é nova migração.
 
+#### `soil_state_history` (histórico diário do estado do solo; ADR 0022, fase 4, migração `000024`)
+
+`id`, `company_id`, `farm_id`, `field_id` (FK composta `(company_id, farm_id, field_id)` → `fields (company_id, farm_id, id)`), `local_day` (date, dia no fuso das fazendas), `state` (`dry`, `ideal`, `moist`, `waterlogged`, `unknown`), `basis` (`inspection`, `measured_rain`, `model`, `none`), `rain_source` (`gauge`, `station`, `model`; nulo sem fonte), `last_48h_mm` e `last_72h_mm` (`numeric(7,2)`, presentes exatamente quando há fonte, 72 h `>=` 48 h), `model_moisture_pct` (% da capacidade de campo, nulo sem modelo ou textura), `soil_texture` (nula), `thresholds_source` (`heuristic`, `calibrated`), `recorded_at`. `UNIQUE (company_id, field_id, local_day)`: o executor grava com `ON CONFLICT DO NOTHING`, então reexecução e várias instâncias não duplicam nem sobrescrevem; o mesmo índice atende a leitura por talhão e intervalo de dias e o lado filho da FK. Retrato do veredito calculado no domínio (o mesmo da rota de trafegabilidade), nunca recalculado no banco. `api_app` só `INSERT` e `SELECT`.
+
 ## 5. Onde cada regra é imposta
 
 | Regra | Onde | Observação |
@@ -484,13 +488,14 @@ Uma linha por `soil_texture` e `effective_from` (`UNIQUE`); vale a mais recente 
 | `rain_gauge_fields` | `(company_id, farm_id, rain_gauge_id)` | talhões de um pluviômetro; lado filho da FK |
 | `rain_readings` | `UNIQUE (company_id, rain_gauge_id, observed_at)`; `(recorded_by)` | leituras de um intervalo; lado filho da FK |
 | `soil_inspections` | `(company_id, field_id, inspected_at DESC)`; `(company_id, farm_id, field_id)`; `(inspected_by)` | vistoria mais recente; lados filhos das FKs |
+| `soil_state_history` | `UNIQUE (company_id, field_id, local_day)` | um registro por dia; histórico de um talhão; lado filho da FK |
 
 FKs compostas já têm índice na chave pai (`UNIQUE (company_id, id)`); o lado filho recebe índice conforme a tabela acima. Busca textual por nome (lista de fazendas e proprietários) começa com `ILIKE`; `pg_trgm` exige ADR (pendência 7).
 
 ## 7. Privilégios
 
 - `api_migrator` cria tudo; `api_app` recebe DML por `ALTER DEFAULT PRIVILEGES` (já no init). O init cria os dois papéis, o banco `api`, `CONNECT` só para o `api_app` e o PostGIS; **nada precisou mudar no init** (em volume antigo, sem PostGIS, criar a extensão à mão).
-- Cada migração retira do `api_app` o que a tabela não usa (privilégio mínimo): `DELETE` em `companies`, `users`, `farms`, `owners` e `invitations` (soft delete); `INSERT`, `UPDATE` e `DELETE` em `crops` (referência); `UPDATE`, `DELETE` e `TRUNCATE` em `elevation_sources` e `elevation_blocks` (só inserem e leem); `DELETE` em `field_terrain` e `terrain_runs` (`field_terrain_adjustments` mantém `DELETE`); `DELETE` em `rain_gauges` (soft delete); `UPDATE`, `DELETE` e `TRUNCATE` em `rain_readings` e `soil_inspections`; `INSERT`, `UPDATE`, `DELETE` e `TRUNCATE` em `trafficability_thresholds` (referência); `rain_gauge_fields` mantém `DELETE` (vínculo substituível); `UPDATE`, `DELETE` e `TRUNCATE` em `audit_events` (append-only). `user_identities`, `auth_sessions`, `user_farm_access` e `farm_owners` mantêm `DELETE` (vínculo e sessão são efêmeros).
+- Cada migração retira do `api_app` o que a tabela não usa (privilégio mínimo): `DELETE` em `companies`, `users`, `farms`, `owners` e `invitations` (soft delete); `INSERT`, `UPDATE` e `DELETE` em `crops` (referência); `UPDATE`, `DELETE` e `TRUNCATE` em `elevation_sources` e `elevation_blocks` (só inserem e leem); `DELETE` em `field_terrain` e `terrain_runs` (`field_terrain_adjustments` mantém `DELETE`); `DELETE` em `rain_gauges` (soft delete); `UPDATE`, `DELETE` e `TRUNCATE` em `rain_readings` e `soil_inspections`; `INSERT`, `UPDATE`, `DELETE` e `TRUNCATE` em `trafficability_thresholds` (referência); `rain_gauge_fields` mantém `DELETE` (vínculo substituível); `UPDATE`, `DELETE` e `TRUNCATE` em `soil_state_history` (só insere e lê); `UPDATE`, `DELETE` e `TRUNCATE` em `audit_events` (append-only). `user_identities`, `auth_sessions`, `user_farm_access` e `farm_owners` mantêm `DELETE` (vínculo e sessão são efêmeros).
 - `api_app` nunca tem DDL nem `BYPASSRLS`. Não há papel de leitura ainda; criar `api_readonly` quando houver relatório.
 - Nenhum outro banco (`label_advisor`, `keycloak`) conecta aqui: `CONNECT` revogado de `PUBLIC`.
 
@@ -527,7 +532,7 @@ FKs compostas já têm índice na chave pai (`UNIQUE (company_id, id)`); o lado 
 6. **Chave `uuid` v4 ou v7:** v7 melhora localidade de índice, mas o PostgreSQL 17 não o gera nativamente (precisaria gerar na aplicação).
 7. **`pg_trgm`** para busca por nome com índice: o `unaccent` entrou pelo ADR 0017 (sem índice); `pg_trgm` depende de outro ADR quando o volume pedir.
 8. **Relevo do talhão (ADR 0021):** implementado nas migrações `000019` a `000021` (`postgis_raster` verificado, `elevation_sources`, `elevation_blocks`, `terrain_runs`, `field_terrain`, `field_terrain_adjustments`; dicionário na seção 4). Contrato e API HTTP implementados (5 operações da tag `Terrain`, 2026-11-24). A classe de relevo e a compatibilidade dos métodos são derivadas no domínio da API, nunca em SQL. Em aberto: o `farm_id` de `field_terrain` não é amarrado por FK ao `farm_id` do talhão; o índice `UNIQUE (company_id, farm_id, id)` em `fields` já existe (migração `000022`), e amarrar `field_terrain` a ele seria uma migração nova.
-9. **Chuva, solo e trafegabilidade (ADR 0022, fase 2):** migrações `000022` (índice único em `fields`, `CONCURRENTLY`, sozinho no arquivo) e `000023` (`fields.soil_texture`, `rain_gauges`, `rain_gauge_fields`, `rain_readings`, `soil_inspections`, `trafficability_thresholds`). Em aberto: histórico de estados calculados (`soil_state_history`, fase 4) e calibração dos limites (nova linha com `source = 'calibrated'`).
+9. **Chuva, solo e trafegabilidade (ADR 0022, fase 2):** migrações `000022` (índice único em `fields`, `CONCURRENTLY`, sozinho no arquivo) e `000023` (`fields.soil_texture`, `rain_gauges`, `rain_gauge_fields`, `rain_readings`, `soil_inspections`, `trafficability_thresholds`). O histórico diário `soil_state_history` entrou na migração `000024` (fase 4), gravado pelo executor da API; ainda sem rota de leitura. Em aberto: calibração dos limites (nova linha com `source = 'calibrated'`).
 
 ## 10. Mudanças desta revisão (2026-11-22)
 
@@ -585,3 +590,10 @@ Cada ajuste em relação ao desenho anterior, com o motivo. Verificados por `mak
 | 26 | `fields.soil_texture` nula, com `CHECK` adicionado `NOT VALID` e validado em seguida | Sem reescrita da tabela nem lock exclusivo durante a varredura |
 | 27 | `rain_gauges`, `rain_gauge_fields`, `rain_readings`, `soil_inspections` com `company_id NOT NULL` e índices que começam por `company_id` | Tenant no schema (ADR 0013) |
 | 28 | `trafficability_thresholds` global e semeada como heurística; vale a linha mais recente com vigência até hoje | Limites são configuração versionada, calibrável sem mudar código (ADR 0022, decisão 2) |
+
+### Adendo (migração 000024, 2026-11-26)
+
+| # | Ajuste | Por quê |
+|---|---|---|
+| 29 | `soil_state_history` com `UNIQUE (company_id, field_id, local_day)` e FK composta com `farm_id` | Um registro por talhão e dia mesmo com várias instâncias; o índice único já começa por `company_id` e serve à leitura e à FK, sem índice extra numa tabela que só cresce |
+| 30 | `CHECK` amarrando `rain_source` às chuvas de 48 e 72 h | Registro coerente: chuva sem fonte (ou fonte sem chuva) é erro de gravação, não dado |

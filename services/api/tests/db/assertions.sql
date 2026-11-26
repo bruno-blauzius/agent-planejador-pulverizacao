@@ -414,6 +414,38 @@ SELECT t.expect_error($q$INSERT INTO trafficability_thresholds (soil_texture, ef
     VALUES ('clay', '2027-01-01', 2, 8, 15, 60, 90, 100, 1.5, 6, 0.36, 'guess')$q$, '23514'); -- origem desconhecida
 
 -- ---------------------------------------------------------------------------
+-- Histórico do estado do solo (migração 000024)
+-- ---------------------------------------------------------------------------
+INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-26', 'waterlogged', 'measured_rain', 'gauge', 24, 55, 113.9, 'clay', 'heuristic');
+INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-25', 'unknown', 'none', NULL, NULL, NULL, NULL, NULL, 'heuristic');
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-26', 'dry', 'model', 'model', 0, 0, NULL, 'clay', 'heuristic')$q$, '23505'); -- mesmo talhão e dia
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', 0, 0, NULL, 'clay', 'heuristic')$q$, '23503'); -- talhão de A com company_id B
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', 0, 0, NULL, 'clay', 'heuristic')$q$, '23503'); -- talhão em outra fazenda
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'muddy', 'model', 'model', 0, 0, NULL, 'clay', 'heuristic')$q$, '23514'); -- estado desconhecido
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'guess', 'model', 0, 0, NULL, 'clay', 'heuristic')$q$, '23514'); -- base desconhecida
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'radar', 0, 0, NULL, 'clay', 'heuristic')$q$, '23514'); -- fonte desconhecida
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', NULL, 3, 3, NULL, 'clay', 'heuristic')$q$, '23514'); -- chuva sem fonte
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', NULL, NULL, NULL, 'clay', 'heuristic')$q$, '23514'); -- fonte sem chuva
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', 10, 5, NULL, 'clay', 'heuristic')$q$, '23514'); -- 72 h menor que 48 h
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', 0, 0, -1, 'clay', 'heuristic')$q$, '23514'); -- umidade negativa
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', 0, 0, NULL, 'loam', 'heuristic')$q$, '23514'); -- textura desconhecida
+SELECT t.expect_error($q$INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', 0, 0, NULL, 'clay', 'guess')$q$, '23514'); -- origem dos limites desconhecida
+
+-- ---------------------------------------------------------------------------
 -- Estrutura (catálogo)
 -- ---------------------------------------------------------------------------
 SELECT t.expect((SELECT count(*) FROM crops) = 6, 'seed de culturas');
@@ -517,6 +549,17 @@ UPDATE rain_gauges SET name = 'Sede nova', updated_at = now(), version = version
 UPDATE fields SET soil_texture = 'medium' WHERE id = 'f1e10000-0000-0000-0000-0000000000f1';
 DELETE FROM rain_gauge_fields WHERE field_id = 'f1e10000-0000-0000-0000-0000000000f1';
 SELECT t.expect((SELECT count(*) = 0 FROM rain_gauge_fields), 'api_app removeu o vinculo');
+-- Histórico do solo: só INSERT e SELECT.
+SELECT t.expect((SELECT count(*) = 2 FROM soil_state_history), 'api_app le soil_state_history');
+INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'ideal', 'model', 'model', 4, 4, 70, 'medium', 'heuristic');
+INSERT INTO soil_state_history (company_id, farm_id, field_id, local_day, state, basis, rain_source, last_48h_mm, last_72h_mm, model_moisture_pct, soil_texture, thresholds_source)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '2026-11-27', 'dry', 'model', 'model', 0, 0, NULL, 'medium', 'heuristic')
+ON CONFLICT (company_id, field_id, local_day) DO NOTHING;
+SELECT t.expect((SELECT state = 'ideal' FROM soil_state_history WHERE local_day = '2026-11-27'), 'ON CONFLICT DO NOTHING preserva o primeiro registro do dia');
+SELECT t.expect_error('UPDATE public.soil_state_history SET state = ''dry''', '42501');
+SELECT t.expect_error('DELETE FROM public.soil_state_history', '42501');
+SELECT t.expect_error('TRUNCATE public.soil_state_history', '42501');
 -- O ajuste manual PODE ser removido de verdade (volta ao valor calculado).
 DELETE FROM field_terrain_adjustments WHERE id = 'ad000000-0000-0000-0000-0000000000a1';
 SELECT t.expect((SELECT count(*) = 0 FROM field_terrain_adjustments), 'api_app removeu o ajuste');

@@ -264,6 +264,23 @@ type SoilInspection struct {
 	RecordedAt  time.Time
 }
 
+type SoilStateHistory struct {
+	ID               string
+	CompanyID        string
+	FarmID           string
+	FieldID          string
+	LocalDay         pgtype.Date
+	State            string
+	Basis            string
+	RainSource       pgtype.Text
+	Last48hMm        pgtype.Numeric
+	Last72hMm        pgtype.Numeric
+	ModelMoisturePct pgtype.Numeric
+	SoilTexture      pgtype.Text
+	ThresholdsSource string
+	RecordedAt       time.Time
+}
+
 type TerrainRun struct {
 	ID          string
 	CompanyID   string

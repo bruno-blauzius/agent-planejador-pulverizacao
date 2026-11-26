@@ -67,6 +67,15 @@ type dependencies struct {
 	Settings  usecase.Settings
 }
 
+// trafficabilityDeps are the ports of the trafficability core, shared by the
+// GET route and the daily soil history executor, so both compute the same verdict.
+func (d dependencies) trafficabilityDeps() usecase.GetFieldTrafficabilityDeps {
+	return usecase.GetFieldTrafficabilityDeps{
+		Fields: d.Conditions, Gauges: d.Conditions, Thresholds: d.Conditions, Terrain: d.Terrain,
+		Weather: d.Weather, Clock: d.Clock, TerrainRules: d.TerrainRules, Settings: d.Trafficability,
+	}
+}
+
 // newRouteGroups wires the use cases into the HTTP handlers of the business
 // endpoints. It is the only place where use cases are instantiated.
 func newRouteGroups(d dependencies) []httpadapter.RouteGroup {
@@ -184,10 +193,7 @@ func newRouteGroups(d dependencies) []httpadapter.RouteGroup {
 		RecordInspection:  usecase.NewRecordSoilInspection(conditionsDeps),
 		GetSoilProfile:    usecase.NewGetSoilProfile(d.Conditions),
 		UpdateSoilProfile: usecase.NewUpdateSoilProfile(conditionsDeps),
-		GetTrafficability: usecase.NewGetFieldTrafficability(usecase.GetFieldTrafficabilityDeps{
-			Fields: d.Conditions, Gauges: d.Conditions, Thresholds: d.Conditions, Terrain: d.Terrain,
-			Weather: d.Weather, Clock: d.Clock, TerrainRules: d.TerrainRules, Settings: d.Trafficability,
-		}),
+		GetTrafficability: usecase.NewGetFieldTrafficability(d.trafficabilityDeps()),
 	})
 
 	return []httpadapter.RouteGroup{users, invitations, companies, me, farms, owners, documents, terrain, trafficability}

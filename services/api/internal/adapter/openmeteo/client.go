@@ -104,7 +104,7 @@ func (c *Client) Weather(ctx context.Context, cell domain.WeatherCell) (usecase.
 	report, err := c.fetch(ctx, cell)
 	if err != nil {
 		// The cause names no URL nor coordinate: the cell is company data sent to a third party.
-		c.cfg.Logger.WarnContext(ctx, "weather provider unavailable", "provider", "open-meteo", "error", err)
+		c.cfg.Logger.WarnContext(ctx, "weather.unavailable", "provider", "open-meteo", "error", err)
 		return usecase.WeatherReport{}, fmt.Errorf("open-meteo: %w: %w", usecase.ErrWeatherUnavailable, err)
 	}
 	return report, nil

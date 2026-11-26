@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/domain"
@@ -343,15 +344,20 @@ func (s *FieldConditions) InsertSoilInspection(_ context.Context, inspection dom
 // ---- weather -------------------------------------------------------------------------
 
 // Weather is a scripted weather provider: it answers Report, or Err when set,
-// and remembers the cells it was asked for.
+// and remembers the cells it was asked for. Safe for concurrent calls (the
+// soil history executor evaluates fields in parallel).
 type Weather struct {
 	Report usecase.WeatherReport
 	Err    error
 	Cells  []domain.WeatherCell
+
+	mu sync.Mutex
 }
 
 // Weather implements usecase.WeatherProvider.
 func (w *Weather) Weather(_ context.Context, cell domain.WeatherCell) (usecase.WeatherReport, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	w.Cells = append(w.Cells, cell)
 	if w.Err != nil {
 		return usecase.WeatherReport{}, w.Err

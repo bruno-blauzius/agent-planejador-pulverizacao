@@ -109,12 +109,19 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	groups := newRouteGroups(dependencies{
+	wired := dependencies{
 		Logger: logger, Store: database, Registry: database, PerimeterParser: perimeter.NewParser(),
 		Documents: documents, Identity: identity, Clock: clock, IDs: ids, Settings: settings,
 		Terrain: database, TerrainRules: cfg.Terrain.Rules, TerrainWakeup: terrain.Wakeup,
 		Conditions: database, Weather: weather, Trafficability: trafficability,
-	})
+	}
+	groups := newRouteGroups(wired)
+	// The daily soil history runs the same trafficability core as the GET route.
+	history, err := buildSoilHistoryRuntime(cfg.Trafficability.History, trafficability.Location, database,
+		usecase.NewTrafficabilityEvaluator(wired.trafficabilityDeps()), clock, logger)
+	if err != nil {
+		return err
+	}
 	groups = append(groups, httpadapter.NewAuthHandlers(httpadapter.AuthHandlerDeps{
 		Logger: logger,
 		Flow:   oidcService,
@@ -165,6 +172,10 @@ func run() error {
 	if err := terrain.Start(ctx); err != nil {
 		return err
 	}
+	// The soil history loop stops with ctx (the signal) and is awaited in shutdown.
+	if err := history.Start(ctx); err != nil {
+		return err
+	}
 
 	lifecycle.MarkStarted()
 	logger.Info("api started", "config", cfg.logValue())
@@ -175,7 +186,7 @@ func run() error {
 	case <-ctx.Done():
 	}
 
-	return shutdown(logger, server, lifecycle, terrain, cfg.Config)
+	return shutdown(logger, server, lifecycle, terrain, history, cfg.Config)
 }
 
 // shutdown drains the instance, in this order:
@@ -185,8 +196,10 @@ func run() error {
 //  3. the relief worker finishes the field it is calculating (it saves through
 //     the pool, so it must end before the pool closes), bounded by the same
 //     timeout; what stays pending or calculating is recovered by the next start;
-//  4. the pool closes afterwards (deferred in run), once nothing can use it.
-func shutdown(logger *slog.Logger, server *http.Server, lifecycle *usecase.Lifecycle, terrain terrainRuntime, cfg platform.Config) error {
+//  4. the soil history executor gives up its run (a field not recorded today is
+//     recorded by the next run or instance), bounded by the same timeout;
+//  5. the pool closes afterwards (deferred in run), once nothing can use it.
+func shutdown(logger *slog.Logger, server *http.Server, lifecycle *usecase.Lifecycle, terrain terrainRuntime, history soilHistoryRuntime, cfg platform.Config) error {
 	logger.Info("shutdown signal received, draining")
 	lifecycle.BeginShutdown()
 
@@ -195,6 +208,7 @@ func shutdown(logger *slog.Logger, server *http.Server, lifecycle *usecase.Lifec
 
 	serverErr := server.Shutdown(ctx)
 	stopTerrain(ctx, logger, terrain)
+	stopSoilHistory(ctx, logger, history)
 	if serverErr != nil && !errors.Is(serverErr, http.ErrServerClosed) {
 		return fmt.Errorf("shutting down http server: %w", serverErr)
 	}

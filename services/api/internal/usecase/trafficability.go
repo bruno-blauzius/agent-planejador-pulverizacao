@@ -95,12 +95,46 @@ type GetFieldTrafficabilityInput struct {
 // each spray method per day (ADR 0022). It is read-only: the screen and the
 // planner agent consume the same answer.
 type GetFieldTrafficability struct {
-	deps GetFieldTrafficabilityDeps
+	evaluator *TrafficabilityEvaluator
 }
 
 // NewGetFieldTrafficability builds the use case.
 func NewGetFieldTrafficability(deps GetFieldTrafficabilityDeps) *GetFieldTrafficability {
-	return &GetFieldTrafficability{deps: deps}
+	return &GetFieldTrafficability{evaluator: NewTrafficabilityEvaluator(deps)}
+}
+
+// FieldRef locates a field of a company.
+type FieldRef struct {
+	CompanyID domain.CompanyID
+	FarmID    domain.FarmID
+	FieldID   domain.FieldID
+}
+
+// TrafficabilityEvaluator is the core of GetFieldTrafficability: it reads the
+// data of one field and lets the domain decide. It checks no actor: the GET
+// use case checks the scope of the caller first, and the soil history
+// executor (no user) runs it for every field of every company. Both get the
+// very same verdict.
+type TrafficabilityEvaluator struct {
+	deps GetFieldTrafficabilityDeps
+}
+
+// NewTrafficabilityEvaluator builds the core.
+func NewTrafficabilityEvaluator(deps GetFieldTrafficabilityDeps) *TrafficabilityEvaluator {
+	return &TrafficabilityEvaluator{deps: deps}
+}
+
+// Evaluate returns the trafficability of the field for today and `days`
+// forecast days (1 to 7). ErrNotFound when the field is not in the farm of the company.
+func (uc *TrafficabilityEvaluator) Evaluate(ctx context.Context, field FieldRef, days int) (FieldTrafficabilityView, error) {
+	if days < 1 || days > maxTrafficabilityDays {
+		return FieldTrafficabilityView{}, domain.Invalid("days", "deve estar entre 1 e 7")
+	}
+	inputs, err := uc.read(ctx, field)
+	if err != nil {
+		return FieldTrafficabilityView{}, err
+	}
+	return uc.decide(inputs, days)
 }
 
 // trafficabilityInputs is everything read before the domain decides.
@@ -127,18 +161,11 @@ func (uc *GetFieldTrafficability) Execute(ctx context.Context, in GetFieldTraffi
 	if days == 0 {
 		days = defaultTrafficabilityDays
 	}
-	if days < 1 || days > maxTrafficabilityDays {
-		return FieldTrafficabilityView{}, domain.Invalid("days", "deve estar entre 1 e 7")
-	}
-	inputs, err := uc.read(ctx, in)
-	if err != nil {
-		return FieldTrafficabilityView{}, err
-	}
-	return uc.decide(inputs, days)
+	return uc.evaluator.Evaluate(ctx, FieldRef{CompanyID: in.Actor.CompanyID, FarmID: in.FarmID, FieldID: in.FieldID}, days)
 }
 
-func (uc *GetFieldTrafficability) read(ctx context.Context, in GetFieldTrafficabilityInput) (trafficabilityInputs, error) {
-	companyID := in.Actor.CompanyID
+func (uc *TrafficabilityEvaluator) read(ctx context.Context, in FieldRef) (trafficabilityInputs, error) {
+	companyID := in.CompanyID
 	now := uc.deps.Clock.Now().In(uc.deps.Settings.Location)
 	inputs := trafficabilityInputs{now: now, today: domain.LocalDay(now, uc.deps.Settings.Location)}
 
@@ -184,7 +211,7 @@ func (uc *GetFieldTrafficability) read(ctx context.Context, in GetFieldTrafficab
 	return inputs, nil
 }
 
-func (uc *GetFieldTrafficability) decide(in trafficabilityInputs, days int) (FieldTrafficabilityView, error) {
+func (uc *TrafficabilityEvaluator) decide(in trafficabilityInputs, days int) (FieldTrafficabilityView, error) {
 	view := FieldTrafficabilityView{FieldID: in.field.FieldID, FarmID: in.field.FarmID, AsOf: in.now, DataIssues: []TrafficabilityDataIssue{}}
 	texture := in.field.Texture
 	if texture == nil {
@@ -229,7 +256,7 @@ func (uc *GetFieldTrafficability) decide(in trafficabilityInputs, days int) (Fie
 
 // rainSource picks the rain of the field: a gauge with a recent reading
 // decides alone; otherwise the weather model, when it answered.
-func (uc *GetFieldTrafficability) rainSource(in trafficabilityInputs) (*domain.RainAccumulation, *string) {
+func (uc *TrafficabilityEvaluator) rainSource(in trafficabilityInputs) (*domain.RainAccumulation, *string) {
 	if gauge := in.field.Gauge; gauge != nil {
 		if rain := domain.GaugeRainAccumulation(in.now, *gauge, in.readings, uc.deps.Settings.GaugeMaxStaleness); rain != nil {
 			name := gauge.Name
@@ -242,7 +269,7 @@ func (uc *GetFieldTrafficability) rainSource(in trafficabilityInputs) (*domain.R
 	return domain.ModelRainAccumulation(in.now, in.weather.Hours), nil
 }
 
-func (uc *GetFieldTrafficability) soilStatus(in trafficabilityInputs, rain *domain.RainAccumulation, sourceName *string) (SoilStatusView, error) {
+func (uc *TrafficabilityEvaluator) soilStatus(in trafficabilityInputs, rain *domain.RainAccumulation, sourceName *string) (SoilStatusView, error) {
 	status := SoilStatusView{
 		State: domain.SoilUnknown, Basis: domain.BasisNone, Texture: in.field.Texture,
 		ThresholdsSource: thresholdsSource(in.thresholds, in.field.Texture), Rain: rain, RainSourceName: sourceName,
@@ -314,7 +341,7 @@ func forecastDays(weather *WeatherReport, today time.Time, days int) []domain.Da
 
 // rainDaily lists the past days (today included) from the same source as the
 // soil state, then the forecast days of the model.
-func (uc *GetFieldTrafficability) rainDaily(in trafficabilityInputs, rain *domain.RainAccumulation, forecast []domain.DailyRain) []DailyRainEntry {
+func (uc *TrafficabilityEvaluator) rainDaily(in trafficabilityInputs, rain *domain.RainAccumulation, forecast []domain.DailyRain) []DailyRainEntry {
 	entries := make([]DailyRainEntry, 0, pastRainDays+len(forecast))
 	first := in.today.AddDate(0, 0, -(pastRainDays - 1))
 	switch {
