@@ -10,6 +10,18 @@ type (
 	InvitationID string
 	// FarmID identifies a farm.
 	FarmID string
+	// OwnerID identifies an owner (person or company linked to farms).
+	OwnerID string
+	// FieldID identifies a field (talhão) of a farm.
+	FieldID string
+	// OwnerDocumentID identifies a document file of an owner.
+	OwnerDocumentID string
+	// RainGaugeID identifies a rain gauge of a farm.
+	RainGaugeID string
+	// RainReadingID identifies a reading of a rain gauge.
+	RainReadingID string
+	// SoilInspectionID identifies a soil inspection of a field.
+	SoilInspectionID string
 )
 
 // Identity links a product user to an account of an external identity

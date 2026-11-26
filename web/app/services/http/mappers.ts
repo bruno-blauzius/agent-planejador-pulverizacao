@@ -178,7 +178,7 @@ export function toOwnerFarmLinkInputDto(input: OwnerFarmLinkInput): OwnerFarmLin
   return { farm_id: input.farmId, role: input.role, share_percent: input.sharePercent }
 }
 
-function toOwnerDocument(dto: OwnerDocumentDto): OwnerDocument {
+export function toOwnerDocument(dto: OwnerDocumentDto): OwnerDocument {
   return { id: dto.id, kind: dto.kind, fileName: dto.file_name, uploadedAt: new Date(dto.uploaded_at) }
 }
 

@@ -20,7 +20,9 @@ migrate up
 
 step "go test -tags integration (papel api_app, 127.0.0.1:$db_port)"
 cd "$api_dir"
-# A senha só trafega por variável de ambiente deste processo; o teste nunca a imprime.
+# As senhas só trafegam por variável de ambiente deste processo; o teste nunca as imprime.
+# O papel migrator só é usado pelo teste da carga da malha do IBGE (dado de referência).
 API_TEST_DATABASE_URL="postgres://api_app:${app_password}@127.0.0.1:${db_port}/api?sslmode=disable" \
+API_TEST_MIGRATOR_DATABASE_URL="postgres://api_migrator:${migrator_password}@127.0.0.1:${db_port}/api?sslmode=disable" \
   go test -count=1 -tags integration "$@" ./internal/adapter/postgres/...
 step "OK: integração do adaptador Postgres"

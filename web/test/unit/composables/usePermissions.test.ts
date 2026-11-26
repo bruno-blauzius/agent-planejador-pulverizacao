@@ -38,7 +38,7 @@ describe('usePermissions', () => {
 
   it('limits an operator to planning and registering, inside the released farms', async () => {
     const permissions = await signIn('carlos.mendes@email.test')
-    expect(permissions.permissions.value).toEqual(['applications.register', 'planner.use'])
+    expect(permissions.permissions.value).toEqual(['applications.register', 'planner.use', 'field_conditions.record'])
     expect(permissions.can('registry.write')).toBe(false)
     expect(permissions.homePath.value).toBe('/farms')
     expect(permissions.isFarmInScope('farm-santa-rita')).toBe(true)

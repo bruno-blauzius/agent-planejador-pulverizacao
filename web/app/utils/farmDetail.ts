@@ -3,21 +3,33 @@
  * Presentation only: conditions come from the API (spray-planner rules), the
  * front never derives them.
  */
+import type { Farm, FarmOwnerShare } from '~/types/farm'
 import type { FieldBlock, Field } from '~/types/field'
 import type { GeoJsonPolygon } from '~/types/geo'
+import type { LinkRole } from '~/types/owner'
 import type { SprayCondition } from '~/types/spray'
-import { formatDaysAgo, formatHectares, formatMonthYear } from './format'
-import { SPRAY_CONDITION_LABELS } from './labels'
+import type { FarmHeaderActionView } from './terrain'
+import {
+  formatCoordinates,
+  formatDaysAgo,
+  formatHectares,
+  formatMonthYear,
+  formatPercent,
+  formatPostalCode,
+  initials,
+} from './format'
+import { FARM_STATUS_LABELS, LINK_ROLE_LABELS, PRODUCTION_TYPE_LABELS, SPRAY_CONDITION_LABELS } from './labels'
 
-export type FarmDetailTab = 'overview' | 'fields' | 'owners' | 'applications' | 'windows'
+export type FarmDetailTab = 'overview' | 'fields' | 'terrain' | 'owners' | 'applications' | 'windows'
 export type FarmMapMode = 'crop' | 'status' | 'satellite'
 
-export const FARM_DETAIL_TABS: readonly FarmDetailTab[] = ['overview', 'fields', 'owners', 'applications', 'windows']
+export const FARM_DETAIL_TABS: readonly FarmDetailTab[] = ['overview', 'fields', 'terrain', 'owners', 'applications', 'windows']
 export const FARM_MAP_MODES: readonly FarmMapMode[] = ['crop', 'status', 'satellite']
 
 export const FARM_DETAIL_TAB_LABELS: Readonly<Record<FarmDetailTab, string>> = {
   overview: 'Visão geral',
   fields: 'Áreas e talhões',
+  terrain: 'Terreno',
   owners: 'Proprietários',
   applications: 'Aplicações',
   windows: 'Janelas de pulverização',
@@ -137,20 +149,116 @@ export interface FieldPopoverView {
   readonly planApplication: DisabledAction
 }
 
-const ENABLED_TABS: ReadonlySet<FarmDetailTab> = new Set(['fields'])
+/** Applications and spray windows wait for their endpoints (Fase 4 and planner). */
+const ENABLED_TABS: ReadonlySet<FarmDetailTab> = new Set(['overview', 'fields', 'terrain', 'owners'])
 
 export function isFarmDetailTabEnabled(tab: FarmDetailTab): boolean {
   return ENABLED_TABS.has(tab)
 }
 
+/** `?tab=` of the farm screen; anything else (or a disabled tab) opens "Áreas e talhões". */
+export function farmDetailTabFrom(value: unknown): FarmDetailTab {
+  const tab = FARM_DETAIL_TABS.find(item => item === value)
+  return tab && isFarmDetailTabEnabled(tab) ? tab : 'fields'
+}
+
+export interface FarmFactView {
+  readonly label: string
+  readonly value: string
+  /** Not filled in the registry: shown muted. */
+  readonly isEmpty: boolean
+}
+
+export interface FarmFactSectionView {
+  readonly title: string
+  readonly facts: readonly FarmFactView[]
+}
+
+export interface FarmOwnerRowView {
+  readonly ownerId: string
+  readonly name: string
+  readonly initials: string
+  readonly roleLabel: string
+  /** "60%" for owners; null for tenants and legal representatives. */
+  readonly shareLabel: string | null
+  /** Opens the owner edit modal (screen 4). */
+  readonly to: string
+}
+
+const EMPTY_FACT = '—'
+
+function fact(label: string, value: string | null | undefined): FarmFactView {
+  const text = value?.trim() ?? ''
+  return { label, value: text || EMPTY_FACT, isEmpty: !text }
+}
+
 /**
- * Tabs of the farm screens (9 and 10). Only "Áreas e talhões" has a screen;
- * applications have no endpoint yet, so they never show an invented count.
+ * "Visão geral" tab: the registry data of the farm, grouped like the wizard
+ * review. No Figma frame: reuses the review layout. Areas come from the API.
  */
-export function farmDetailTabs(counts: { fields: number | null, owners: number | null }): FarmDetailTabView[] {
+export function toFarmOverviewView(farm: Farm): FarmFactSectionView[] {
+  const location = [farm.city, farm.state].filter(Boolean).join(' / ')
+  return [
+    {
+      title: 'Identificação',
+      facts: [
+        fact('Nome', farm.name),
+        fact('Apelido / código', farm.code),
+        fact('Cooperativa', farm.cooperative),
+        fact('Tipo de produção', PRODUCTION_TYPE_LABELS[farm.productionType]),
+        fact('Situação do cadastro', FARM_STATUS_LABELS[farm.status]),
+      ],
+    },
+    {
+      title: 'Localização',
+      facts: [
+        fact('Município / UF', location),
+        fact('CEP', farm.location.postalCode ? formatPostalCode(farm.location.postalCode) : null),
+        fact('Nº do CAR', farm.location.carNumber),
+        fact('Sede (lat · lng)', farm.forecastPoint ? formatCoordinates(farm.forecastPoint) : null),
+      ],
+    },
+    {
+      title: 'Áreas e culturas',
+      facts: [
+        fact('Área total', formatHectares(farm.totalAreaHa)),
+        fact('Área produtiva', formatHectares(farm.productiveAreaHa)),
+        fact('Talhões', String(farm.fieldCount)),
+        fact('Culturas', farm.crops.map(crop => crop.name).join(', ')),
+      ],
+    },
+  ]
+}
+
+/** "Proprietários" tab: the farm links, owners first, then by name. */
+export function toFarmOwnerRows(owners: readonly FarmOwnerShare[]): FarmOwnerRowView[] {
+  const roleOrder: readonly LinkRole[] = ['owner', 'tenant', 'legal_representative']
+  return [...owners]
+    .sort((a, b) => roleOrder.indexOf(a.role) - roleOrder.indexOf(b.role) || a.name.localeCompare(b.name, 'pt-BR'))
+    .map(owner => ({
+      ownerId: owner.ownerId,
+      name: owner.name,
+      initials: initials(owner.name),
+      roleLabel: LINK_ROLE_LABELS[owner.role],
+      shareLabel: owner.sharePercent === null ? null : formatPercent(owner.sharePercent),
+      to: `/owners?owner=${encodeURIComponent(owner.ownerId)}`,
+    }))
+}
+
+/**
+ * Tabs of the farm screens (9 and 10). Applications and spray windows have no
+ * endpoint yet, so they stay disabled and never show an invented count.
+ */
+export function farmDetailTabs(counts: {
+  fields: number | null
+  owners: number | null
+  /** Fields with a restricted method (alert badge of "Relevo"); null or 0 shows no badge. */
+  terrainRestricted?: number | null
+}): FarmDetailTabView[] {
   const countOf: Readonly<Record<FarmDetailTab, number | null>> = {
     overview: null,
     fields: counts.fields,
+    terrain: counts.terrainRestricted ? counts.terrainRestricted : null,
     owners: counts.owners,
     applications: null,
     windows: null,
@@ -288,4 +396,49 @@ export function editFieldRoute(farmId: string, fieldId: string): string {
 export function newFieldRoute(farmId: string, block: string | null = null): string {
   const base = `/farms/${encodeURIComponent(farmId)}/fields/new`
   return block ? `${base}?block=${encodeURIComponent(block)}` : base
+}
+
+export interface FarmHeaderActionContext {
+  readonly farmId: string
+  /** `registry.write` of the session; presentation only, the API answers 403. */
+  readonly canWrite: boolean
+  /** Relief state of the farm; null until loaded or outside the "Relevo" tab. */
+  readonly terrain: {
+    readonly calculatedFieldCount: number
+    /** A calculation is running (`progress` present). */
+    readonly running: boolean
+    /** The calculation request is in flight. */
+    readonly requesting: boolean
+  } | null
+}
+
+/**
+ * Header buttons of the farm screen by tab. "Relevo": "Como calculamos" always,
+ * then "Calcular relevo" (nothing calculated yet) or "Recalcular relevo" for
+ * whoever can write. Other tabs: "Nova área" (not available yet) and "Novo talhão".
+ */
+export function farmHeaderActions(tab: FarmDetailTab, context: FarmHeaderActionContext): FarmHeaderActionView[] {
+  if (tab === 'terrain') {
+    const actions: FarmHeaderActionView[] = [
+      { id: 'terrainMethodology', label: 'Como calculamos', icon: 'info', variant: 'secondary', to: null, unavailableHint: null, loading: false },
+    ]
+    if (context.canWrite) {
+      const neverCalculated = (context.terrain?.calculatedFieldCount ?? 0) === 0
+      actions.push({
+        id: neverCalculated ? 'calculateTerrain' : 'recalculateTerrain',
+        label: neverCalculated ? 'Calcular relevo' : 'Recalcular relevo',
+        icon: null,
+        variant: 'primary',
+        to: null,
+        unavailableHint: null,
+        loading: Boolean(context.terrain && (context.terrain.running || context.terrain.requesting)),
+      })
+    }
+    return actions
+  }
+  if (!context.canWrite) return []
+  return [
+    { id: 'newArea', label: 'Nova área', icon: 'plus', variant: 'secondary', to: null, unavailableHint: COMING_SOON.hint, loading: false },
+    { id: 'newField', label: 'Novo talhão', icon: 'plus', variant: 'primary', to: newFieldRoute(context.farmId), unavailableHint: null, loading: false },
+  ]
 }

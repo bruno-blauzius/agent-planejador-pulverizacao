@@ -20,6 +20,7 @@ const (
 	codeUnsupportedMediaType = "unsupported_media_type"
 	codeInternal             = "internal_error"
 	codeProviderUnavailable  = "identity_provider_unavailable"
+	codeStorageUnavailable   = "document_storage_unavailable"
 )
 
 // apiError is a failure already expressed in HTTP terms. Handlers return it
@@ -116,9 +117,14 @@ var failureRules = []failureRule{
 	{domain.ErrInvitationClosed, http.StatusConflict, "invitation_closed", "o convite já foi aceito ou cancelado"},
 	{usecase.ErrLastSuperAdmin, http.StatusConflict, "last_super_admin", "a plataforma não pode ficar sem super admin ativo"},
 	{usecase.ErrDocumentAlreadyRegistered, http.StatusConflict, codeConflict, "CNPJ já cadastrado"},
+	{usecase.ErrOwnerDocumentTaken, http.StatusConflict, codeConflict, "CPF/CNPJ já cadastrado para outro proprietário"},
 	{usecase.ErrVersionConflict, http.StatusConflict, codeConflict, "o registro foi alterado por outra requisição; tente novamente"},
 	{usecase.ErrIdentityAlreadyLinked, http.StatusConflict, codeConflict, "a conta já está vinculada a outro usuário"},
 	{domain.ErrInvalidTransition, http.StatusConflict, codeConflict, "mudança de status não permitida no estado atual"},
 
+	{usecase.ErrUnsupportedPerimeterFormat, http.StatusUnsupportedMediaType, codeUnsupportedMediaType, "formato não suportado: envie KML, KMZ, GeoJSON ou Shapefile (.zip)"},
+	{usecase.ErrUnsupportedDocumentMedia, http.StatusUnsupportedMediaType, codeUnsupportedMediaType, "formato não suportado: envie PDF, JPEG ou PNG"},
+
 	{usecase.ErrIdentityProviderUnavailable, http.StatusBadGateway, codeProviderUnavailable, "o provedor de identidade está indisponível"},
+	{usecase.ErrDocumentStorageUnavailable, http.StatusServiceUnavailable, codeStorageUnavailable, "o armazenamento de documentos está indisponível; tente mais tarde"},
 }

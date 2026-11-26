@@ -6,6 +6,10 @@ import type {
   FarmService,
   FieldService,
   OwnerService,
+  TerrainService,
+  RainGaugeService,
+  SoilConditionsService,
+  TrafficabilityService,
 } from '../ports'
 import type {
   CropDto,
@@ -13,6 +17,7 @@ import type {
   FarmSummaryDto,
   FieldDto,
   ItemsDto,
+  OwnerDocumentDto,
   OwnerDto,
   OwnerFarmLinkDto,
   OwnerSummaryDto,
@@ -20,6 +25,8 @@ import type {
   PerimeterImportDto,
   UserDto,
 } from '~/types/dto'
+import type { FarmTerrainDto, FieldTerrainDto } from '~/types/terrainDto'
+import type { FieldTrafficabilityDto, RainGaugeDto, RainReadingDto, SoilInspectionDto, SoilProfileDto } from '~/types/trafficabilityDto'
 import type { HttpClient } from './client'
 import {
   createCompanyHttpService,
@@ -40,6 +47,7 @@ import {
   toField,
   toFieldInputDto,
   toOwner,
+  toOwnerDocument,
   toOwnerFarmLink,
   toOwnerFarmLinkInputDto,
   toOwnerInputDto,
@@ -48,6 +56,24 @@ import {
   toPerimeterImport,
   toUser,
 } from './mappers'
+import {
+  toFarmTerrain,
+  toFieldTerrain,
+  toFieldTerrainAdjustmentInputDto,
+  toTerrainCalculationRequestDto,
+} from './terrainMappers'
+import {
+  toFieldTrafficability,
+  toRainGauge,
+  toRainGaugeInputDto,
+  toRainGaugePatchDto,
+  toRainReading,
+  toRainReadingInputDto,
+  toSoilInspectionInputDto,
+  toSoilInspectionRecord,
+  toSoilProfile,
+  toSoilProfileInputDto,
+} from './trafficabilityMappers'
 
 const segment = encodeURIComponent
 
@@ -141,7 +167,7 @@ export function createCropHttpService(http: HttpClient): CropService {
   }
 }
 
-export function createOwnerHttpService(http: HttpClient): OwnerService {
+export function createOwnerHttpService(http: HttpClient, baseURL: string): OwnerService {
   return {
     async list(filters = {}) {
       const dto = await http<PageDto<OwnerSummaryDto>>('/owners', {
@@ -175,6 +201,105 @@ export function createOwnerHttpService(http: HttpClient): OwnerService {
       })
       return dto.items.map(toOwnerFarmLink)
     },
+    async uploadDocument(ownerId, upload) {
+      const body = new FormData()
+      body.append('kind', upload.kind)
+      body.append('file', upload.file, upload.fileName)
+      return toOwnerDocument(await http<OwnerDocumentDto>(`/owners/${segment(ownerId)}/documents`, { method: 'POST', body }))
+    },
+    async removeDocument(ownerId, documentId) {
+      await http<unknown>(`/owners/${segment(ownerId)}/documents/${segment(documentId)}`, { method: 'DELETE' })
+    },
+    documentUrl(ownerId, documentId) {
+      return `${baseURL.replace(/\/$/, '')}/owners/${segment(ownerId)}/documents/${segment(documentId)}/content`
+    },
+  }
+}
+
+export function createTerrainHttpService(http: HttpClient): TerrainService {
+  const fieldPath = (farmId: string, fieldId: string) => `/farms/${segment(farmId)}/fields/${segment(fieldId)}/terrain`
+  return {
+    async getFarm(farmId) {
+      return toFarmTerrain(await http<FarmTerrainDto>(`/farms/${segment(farmId)}/terrain`))
+    },
+    async calculate(farmId, scope) {
+      const dto = await http<FarmTerrainDto>(`/farms/${segment(farmId)}/terrain/calculations`, {
+        method: 'POST',
+        body: toTerrainCalculationRequestDto(scope),
+      })
+      return toFarmTerrain(dto)
+    },
+    async getField(farmId, fieldId) {
+      return toFieldTerrain(await http<FieldTerrainDto>(fieldPath(farmId, fieldId)))
+    },
+    async adjust(farmId, fieldId, input) {
+      const dto = await http<FieldTerrainDto>(`${fieldPath(farmId, fieldId)}/adjustment`, {
+        method: 'PUT',
+        body: toFieldTerrainAdjustmentInputDto(input),
+      })
+      return toFieldTerrain(dto)
+    },
+    async removeAdjustment(farmId, fieldId) {
+      return toFieldTerrain(await http<FieldTerrainDto>(`${fieldPath(farmId, fieldId)}/adjustment`, { method: 'DELETE' }))
+    },
+  }
+}
+
+export function createTrafficabilityHttpService(http: HttpClient): TrafficabilityService {
+  return {
+    async getFieldTrafficability(farmId, fieldId, days) {
+      const dto = await http<FieldTrafficabilityDto>(`/farms/${segment(farmId)}/fields/${segment(fieldId)}/trafficability`, {
+        query: { days },
+      })
+      return toFieldTrafficability(dto)
+    },
+  }
+}
+
+export function createRainGaugeHttpService(http: HttpClient): RainGaugeService {
+  const gaugesPath = (farmId: string) => `/farms/${segment(farmId)}/rain-gauges`
+  const gaugePath = (farmId: string, gaugeId: string) => `${gaugesPath(farmId)}/${segment(gaugeId)}`
+  return {
+    async list(farmId) {
+      const dto = await http<ItemsDto<RainGaugeDto>>(gaugesPath(farmId))
+      return dto.items.map(toRainGauge)
+    },
+    async create(farmId, input) {
+      return toRainGauge(await http<RainGaugeDto>(gaugesPath(farmId), { method: 'POST', body: toRainGaugeInputDto(input) }))
+    },
+    async update(farmId, gaugeId, patch) {
+      return toRainGauge(await http<RainGaugeDto>(gaugePath(farmId, gaugeId), { method: 'PATCH', body: toRainGaugePatchDto(patch) }))
+    },
+    async listReadings(farmId, gaugeId, range = {}) {
+      const dto = await http<ItemsDto<RainReadingDto>>(`${gaugePath(farmId, gaugeId)}/readings`, {
+        query: { from: range.from?.toISOString(), to: range.to?.toISOString() },
+      })
+      return dto.items.map(toRainReading)
+    },
+    async recordReading(farmId, gaugeId, input) {
+      const dto = await http<RainReadingDto>(`${gaugePath(farmId, gaugeId)}/readings`, { method: 'POST', body: toRainReadingInputDto(input) })
+      return toRainReading(dto)
+    },
+  }
+}
+
+export function createSoilConditionsHttpService(http: HttpClient): SoilConditionsService {
+  const fieldPath = (farmId: string, fieldId: string) => `/farms/${segment(farmId)}/fields/${segment(fieldId)}`
+  return {
+    async recordInspection(farmId, fieldId, input) {
+      const dto = await http<SoilInspectionDto>(`${fieldPath(farmId, fieldId)}/soil-inspections`, {
+        method: 'POST',
+        body: toSoilInspectionInputDto(input),
+      })
+      return toSoilInspectionRecord(dto)
+    },
+    async getProfile(farmId, fieldId) {
+      return toSoilProfile(await http<SoilProfileDto>(`${fieldPath(farmId, fieldId)}/soil-profile`))
+    },
+    async updateProfile(farmId, fieldId, input) {
+      const dto = await http<SoilProfileDto>(`${fieldPath(farmId, fieldId)}/soil-profile`, { method: 'PUT', body: toSoilProfileInputDto(input) })
+      return toSoilProfile(dto)
+    },
   }
 }
 
@@ -185,7 +310,7 @@ export function createHttpServices(http: HttpClient, baseURL: string): ApiServic
     farms: createFarmHttpService(http),
     fields: createFieldHttpService(http),
     crops: createCropHttpService(http),
-    owners: createOwnerHttpService(http),
+    owners: createOwnerHttpService(http, baseURL),
     users: createUserHttpService(http),
     companies: createCompanyHttpService(http),
     profile: createProfileHttpService(http),
@@ -194,5 +319,9 @@ export function createHttpServices(http: HttpClient, baseURL: string): ApiServic
     applications: createApplicationHttpService(http),
     today: createTodayHttpService(http),
     weather: createWeatherHttpService(http),
+    terrain: createTerrainHttpService(http),
+    trafficability: createTrafficabilityHttpService(http),
+    rainGauges: createRainGaugeHttpService(http),
+    soilConditions: createSoilConditionsHttpService(http),
   }
 }

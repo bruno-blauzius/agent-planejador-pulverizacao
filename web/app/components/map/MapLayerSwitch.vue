@@ -8,7 +8,7 @@ import type { SegmentOption } from '../SegmentedControl.vue'
  * (e.g. FARM_MAP_MODE_LABELS). Satellite is disabled, with its reason, when no
  * imagery source is configured (NUXT_PUBLIC_MAP_SATELLITE_URL, ADR 0012).
  */
-export type MapLayer = MapColorBy | 'satellite'
+export type MapLayer = Exclude<MapColorBy, 'terrain'> | 'satellite'
 
 const props = withDefaults(
   defineProps<{

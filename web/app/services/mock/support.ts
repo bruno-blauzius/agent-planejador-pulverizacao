@@ -22,6 +22,7 @@ export const STATUS_BY_CODE: Record<Exclude<ApiErrorCode, 'network_error' | 'unk
   no_access_to_product: 403,
   ambiguous_role: 403,
   identity_provider_unavailable: 502,
+  document_storage_unavailable: 503,
   email_already_registered: 409,
   email_not_verified: 409,
   company_inactive: 409,

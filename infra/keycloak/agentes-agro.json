@@ -172,6 +172,10 @@
     {
       "name": "planner.use",
       "description": "Usar o Planejador e o agente"
+    },
+    {
+      "name": "field_conditions.record",
+      "description": "Lançar leituras de pluviômetro e vistorias do solo do talhão"
     }
   ],
   "profiles": [
@@ -186,7 +190,8 @@
         "registry.write",
         "applications.register",
         "applications.confirm",
-        "planner.use"
+        "planner.use",
+        "field_conditions.record"
       ]
     },
     {
@@ -198,7 +203,8 @@
         "registry.write",
         "applications.register",
         "applications.confirm",
-        "planner.use"
+        "planner.use",
+        "field_conditions.record"
       ]
     },
     {
@@ -206,7 +212,8 @@
       "description": "Operador de planejamento: usa o Planejador e registra aplicações nas fazendas liberadas",
       "permissions": [
         "applications.register",
-        "planner.use"
+        "planner.use",
+        "field_conditions.record"
       ]
     }
   ],

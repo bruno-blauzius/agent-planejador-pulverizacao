@@ -9,7 +9,28 @@ import type { Crop } from '~/types/crop'
 import type { Farm, FarmFilters, FarmInput, FarmSummary, PerimeterImport } from '~/types/farm'
 import type { Field, FieldInput } from '~/types/field'
 import type {
+  FarmTerrain,
+  FieldTerrain,
+  FieldTerrainAdjustmentInput,
+  TerrainCalculationScope,
+} from '~/types/terrain'
+import type {
+  FieldTrafficability,
+  RainGauge,
+  RainGaugeInput,
+  RainGaugePatch,
+  RainReading,
+  RainReadingInput,
+  RainReadingRange,
+  SoilInspection,
+  SoilInspectionInput,
+  SoilProfile,
+  SoilProfileInput,
+} from '~/types/trafficability'
+import type {
   Owner,
+  OwnerDocument,
+  OwnerDocumentUpload,
   OwnerFarmLink,
   OwnerFarmLinkInput,
   OwnerFilters,
@@ -90,6 +111,66 @@ export interface FieldService {
   update(farmId: string, fieldId: string, input: FieldInput): Promise<Field>
 }
 
+/**
+ * Relief of the fields (ADR 0021, tag `Terrain`, `planned`). Reading needs no
+ * capability; calculating, adjusting and removing an adjustment need
+ * `registry.write` (403).
+ */
+export interface TerrainService {
+  /** `GET /farms/{farmId}/terrain`. Fields never calculated come as `not_calculated`. */
+  getFarm(farmId: string): Promise<FarmTerrain>
+  /** `POST /farms/{farmId}/terrain/calculations` (202). Repeating it while running returns the current state. */
+  calculate(farmId: string, scope: TerrainCalculationScope): Promise<FarmTerrain>
+  /** `GET /farms/{farmId}/fields/{fieldId}/terrain`. */
+  getField(farmId: string, fieldId: string): Promise<FieldTerrain>
+  /** `PUT .../terrain/adjustment`. 422 with `details` (`slope_max_pct`, `justification`, …). */
+  adjust(farmId: string, fieldId: string, input: FieldTerrainAdjustmentInput): Promise<FieldTerrain>
+  /** `DELETE .../terrain/adjustment`. 404 when the field has no adjustment. */
+  removeAdjustment(farmId: string, fieldId: string): Promise<FieldTerrain>
+}
+
+/**
+ * Rain, soil state and method eligibility of a field (ADR 0022, tag
+ * `Trafficability`, `planned`). Read-only; any signed-in user in scope.
+ */
+export interface TrafficabilityService {
+  /**
+   * `GET /farms/{farmId}/fields/{fieldId}/trafficability?days=`. `days` (1–7) are
+   * projection days after today; omitted, the API uses 5. 404 out of scope,
+   * 422 with `details` (`days`) outside the range.
+   */
+  getFieldTrafficability(farmId: string, fieldId: string, days?: number): Promise<FieldTrafficability>
+}
+
+/**
+ * Rain gauges of a farm and their readings (ADR 0022, phase 2). Reading needs
+ * no capability; registering or renaming a gauge needs `registry.write` and
+ * recording a reading `field_conditions.record` (403). A farm out of scope, or a
+ * gauge of another farm, answers 404.
+ */
+export interface RainGaugeService {
+  /** `GET /farms/{farmId}/rain-gauges`, by name. */
+  list(farmId: string): Promise<readonly RainGauge[]>
+  /** `POST /farms/{farmId}/rain-gauges` (201). 422 `name` when empty, too long or repeated in the farm. */
+  create(farmId: string, input: RainGaugeInput): Promise<RainGauge>
+  /** `PATCH .../rain-gauges/{gaugeId}`. 409 on a concurrent edit. */
+  update(farmId: string, gaugeId: string, patch: RainGaugePatch): Promise<RainGauge>
+  /** `GET .../readings?from&to`, newest first. 422 `from` when the range is inverted or longer than 31 days. */
+  listReadings(farmId: string, gaugeId: string, range?: RainReadingRange): Promise<readonly RainReading[]>
+  /** `POST .../readings` (201). 422 `rain_mm` (0–500) or `observed_at` (future, or a reading at the same instant). */
+  recordReading(farmId: string, gaugeId: string, input: RainReadingInput): Promise<RainReading>
+}
+
+/** Soil inspection and soil profile of a field (ADR 0022, phase 2). */
+export interface SoilConditionsService {
+  /** `POST .../soil-inspections` (201, `field_conditions.record`). 422 `state`, `inspected_at` (future) or `note` (> 500). */
+  recordInspection(farmId: string, fieldId: string, input: SoilInspectionInput): Promise<SoilInspection>
+  /** `GET .../soil-profile`; texture and gauge are null until someone sets them. */
+  getProfile(farmId: string, fieldId: string): Promise<SoilProfile>
+  /** `PUT .../soil-profile` (`registry.write`). 422 `rain_gauge_id` for a gauge of another farm. */
+  updateProfile(farmId: string, fieldId: string, input: SoilProfileInput): Promise<SoilProfile>
+}
+
 export interface CropService {
   list(): Promise<readonly Crop[]>
 }
@@ -101,6 +182,15 @@ export interface OwnerService {
   update(ownerId: string, input: OwnerInput): Promise<Owner>
   getLinks(ownerId: string): Promise<readonly OwnerFarmLink[]>
   replaceLinks(ownerId: string, links: readonly OwnerFarmLinkInput[]): Promise<readonly OwnerFarmLink[]>
+  /**
+   * Uploads a document (PDF, JPEG or PNG, ADR 0020). 413 above the limit, 415
+   * for another type (checked by content), 503 `document_storage_unavailable`.
+   */
+  uploadDocument(ownerId: string, upload: OwnerDocumentUpload): Promise<OwnerDocument>
+  /** Soft delete; the owner's pending flag is recomputed by the API. */
+  removeDocument(ownerId: string, documentId: string): Promise<void>
+  /** Address of the file, for a download link (the session cookie goes along). */
+  documentUrl(ownerId: string, documentId: string): string
 }
 
 /** Users and invitations (`users.manage`; 403 when missing). */
@@ -190,4 +280,8 @@ export interface ApiServices {
   readonly applications: ApplicationService
   readonly today: TodayService
   readonly weather: WeatherService
+  readonly terrain: TerrainService
+  readonly trafficability: TrafficabilityService
+  readonly rainGauges: RainGaugeService
+  readonly soilConditions: SoilConditionsService
 }

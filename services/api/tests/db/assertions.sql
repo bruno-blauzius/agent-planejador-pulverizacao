@@ -172,6 +172,247 @@ VALUES ('fd000000-0000-0000-0000-0000000000fd', 'a0000000-0000-0000-0000-0000000
 SELECT t.expect((SELECT perimeter_area_ha BETWEEN 80 AND 120 FROM farms WHERE id = 'fd000000-0000-0000-0000-0000000000fd'), 'area gerada do perimetro (~100 ha)');
 SELECT t.expect_error($q$UPDATE farms SET perimeter_area_ha = 1$q$, '428C9'); -- coluna gerada não é gravável
 
+-- owners: documento por tipo de pessoa, data de nascimento só PF, unicidade por empresa
+INSERT INTO owners (id, company_id, person_type, name, document) VALUES
+    ('0a0a0000-0000-0000-0000-00000000000a', 'a0000000-0000-0000-0000-00000000000a', 'individual', 'Dono A', '52998224725'),
+    ('0b0b0000-0000-0000-0000-00000000000b', 'b0000000-0000-0000-0000-00000000000b', 'company', 'Dona B', '11222333000181');
+SELECT t.expect_error($q$INSERT INTO owners (company_id, person_type, name, document) VALUES ('a0000000-0000-0000-0000-00000000000a', 'individual', 'X', '11222333000181')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO owners (company_id, person_type, name, document) VALUES ('a0000000-0000-0000-0000-00000000000a', 'company', 'X', '52998224725')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO owners (company_id, person_type, name, document, birth_date) VALUES ('a0000000-0000-0000-0000-00000000000a', 'company', 'X', '11444777000161', '1980-01-01')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO owners (company_id, person_type, name, document, phone) VALUES ('a0000000-0000-0000-0000-00000000000a', 'individual', 'X', '11144477735', '(35) 9999')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO owners (company_id, person_type, name, document) VALUES ('a0000000-0000-0000-0000-00000000000a', 'individual', 'X', '52998224725')$q$, '23505');
+-- o mesmo CPF em outra empresa é permitido
+INSERT INTO owners (company_id, person_type, name, document) VALUES ('b0000000-0000-0000-0000-00000000000b', 'individual', 'Dono A em B', '52998224725');
+
+-- farm_owners: tenant cruzado recusado; participação só para o papel owner
+SELECT t.expect_error($q$INSERT INTO farm_owners (company_id, farm_id, owner_id, role, share_percent)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', '0b0b0000-0000-0000-0000-00000000000b', 'owner', 50)$q$, '23503'); -- proprietário de B em fazenda de A
+SELECT t.expect_error($q$INSERT INTO farm_owners (company_id, farm_id, owner_id, role, share_percent)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fa000000-0000-0000-0000-0000000000fa', '0b0b0000-0000-0000-0000-00000000000b', 'owner', 50)$q$, '23503'); -- fazenda de A com company_id B
+SELECT t.expect_error($q$INSERT INTO farm_owners (company_id, farm_id, owner_id, role, share_percent)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', '0a0a0000-0000-0000-0000-00000000000a', 'tenant', 10)$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO farm_owners (company_id, farm_id, owner_id, role, share_percent)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', '0a0a0000-0000-0000-0000-00000000000a', 'owner', NULL)$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO farm_owners (company_id, farm_id, owner_id, role, share_percent)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', '0a0a0000-0000-0000-0000-00000000000a', 'owner', 100.01)$q$, '23514');
+
+-- fields: tenant cruzado recusado, polígono válido com área, nome único por fazenda
+INSERT INTO fields (id, company_id, farm_id, crop_code, name, polygon) VALUES
+    ('f1e10000-0000-0000-0000-0000000000f1', 'a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd',
+     'coffee_arabica', 'Talhao 1', ST_GeomFromText('POLYGON((-47.0 -21.0, -47.0 -20.998, -46.998 -20.998, -46.998 -21.0, -47.0 -21.0))', 4326));
+SELECT t.expect((SELECT area_ha BETWEEN 4 AND 5 FROM fields WHERE id = 'f1e10000-0000-0000-0000-0000000000f1'), 'area gerada do talhao (~4,6 ha)');
+SELECT t.expect_error($q$INSERT INTO fields (company_id, farm_id, crop_code, name, polygon)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fd000000-0000-0000-0000-0000000000fd', 'corn', 'X',
+            ST_GeomFromText('POLYGON((-47.0 -21.0, -47.0 -20.999, -46.999 -20.999, -46.999 -21.0, -47.0 -21.0))', 4326))$q$, '23503'); -- fazenda de A com company_id B
+SELECT t.expect_error($q$INSERT INTO fields (company_id, farm_id, crop_code, name, polygon)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'banana', 'X',
+            ST_GeomFromText('POLYGON((-47.0 -21.0, -47.0 -20.999, -46.999 -20.999, -46.999 -21.0, -47.0 -21.0))', 4326))$q$, '23503'); -- cultura inexistente
+SELECT t.expect_error($q$INSERT INTO fields (company_id, farm_id, crop_code, name, polygon)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'corn', 'Talhao 1',
+            ST_GeomFromText('POLYGON((-46.99 -21.0, -46.99 -20.999, -46.989 -20.999, -46.989 -21.0, -46.99 -21.0))', 4326))$q$, '23505'); -- nome repetido
+SELECT t.expect_error($q$INSERT INTO fields (company_id, farm_id, crop_code, name, polygon)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'corn', 'Gravata',
+            ST_GeomFromText('POLYGON((0 0, 1 1, 1 0, 0 1, 0 0))', 4326))$q$, '23514'); -- autointerseção
+SELECT t.expect_error($q$INSERT INTO fields (company_id, farm_id, crop_code, name, polygon)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'corn', 'Linha',
+            ST_GeomFromText('POLYGON((0 0, 0 0, 0 0, 0 0))', 4326))$q$, '23514'); -- sem área
+SELECT t.expect_error($q$UPDATE fields SET season = '2026-27'$q$, '23514');
+SELECT t.expect_error($q$UPDATE fields SET row_spacing_m = 0$q$, '23514');
+SELECT t.expect_error($q$UPDATE fields SET area_ha = 1$q$, '428C9'); -- coluna gerada não é gravável
+
+-- owner_documents: tenant cruzado recusado, chave sempre no prefixo do proprietário
+SELECT t.expect((SELECT documents_pending FROM owners WHERE id = '0a0a0000-0000-0000-0000-00000000000a'), 'proprietario nasce com documento pendente');
+INSERT INTO owner_documents (id, company_id, owner_id, kind, file_name, content_type, size_bytes, storage_key, uploaded_by_user_id)
+VALUES ('d0c00000-0000-0000-0000-0000000000d1', 'a0000000-0000-0000-0000-00000000000a', '0a0a0000-0000-0000-0000-00000000000a',
+        'id_card', 'rg.pdf', 'application/pdf', 1024,
+        'companies/a0000000-0000-0000-0000-00000000000a/owners/0a0a0000-0000-0000-0000-00000000000a/documents/d0c00000-0000-0000-0000-0000000000d1',
+        '0a000000-0000-0000-0000-00000000000a');
+SELECT t.expect_error($q$INSERT INTO owner_documents (id, company_id, owner_id, kind, file_name, content_type, size_bytes, storage_key, uploaded_by_user_id)
+    VALUES ('d0c00000-0000-0000-0000-0000000000d2', 'b0000000-0000-0000-0000-00000000000b', '0a0a0000-0000-0000-0000-00000000000a', 'id_card', 'x.pdf', 'application/pdf', 1,
+            'companies/b0000000-0000-0000-0000-00000000000b/owners/0a0a0000-0000-0000-0000-00000000000a/documents/d0c00000-0000-0000-0000-0000000000d2',
+            '0a000000-0000-0000-0000-00000000000a')$q$, '23503'); -- proprietário de A com company_id B
+SELECT t.expect_error($q$INSERT INTO owner_documents (company_id, owner_id, kind, file_name, content_type, size_bytes, storage_key, uploaded_by_user_id)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', '0a0a0000-0000-0000-0000-00000000000a', 'id_card', 'x.pdf', 'application/pdf', 1,
+            'outro/prefixo', '0a000000-0000-0000-0000-00000000000a')$q$, '23514'); -- chave fora do prefixo
+SELECT t.expect_error($q$UPDATE owner_documents SET kind = 'passport'$q$, '23514');
+SELECT t.expect_error($q$UPDATE owner_documents SET content_type = 'application/msword'$q$, '23514');
+SELECT t.expect_error($q$UPDATE owner_documents SET size_bytes = 0$q$, '23514');
+
+-- ---------------------------------------------------------------------------
+-- Relevo do talhão (migrações 000019 a 000021)
+-- ---------------------------------------------------------------------------
+-- Fumaça do raster: prova que postgis_raster e o driver GTiff estão ativos (ST_FromGDALRaster
+-- falha com os drivers desabilitados), ladrilha em 256x256 e recorta por polígono.
+CREATE TABLE t.dem AS
+SELECT ST_MapAlgebra(
+           ST_AddBand(ST_MakeEmptyRaster(512, 512, -47.1, -20.9, 0.0003, -0.0003, 0, 0, 4326), '32BF'::text, 0, -9999),
+           1, '32BF'::text, '[rast.x] + [rast.y]'::text) AS rast;
+SELECT t.expect((SELECT ST_Width(rast) = 512 AND ST_Height(rast) = 512 FROM t.dem), 'raster sintetico 512x512');
+CREATE TABLE t.dem_tiff AS SELECT ST_AsGDALRaster(rast, 'GTiff') AS bytes FROM t.dem;
+SELECT t.expect((SELECT length(bytes) > 1000 FROM t.dem_tiff), 'GTiff serializado');
+CREATE TABLE t.dem_read AS SELECT ST_FromGDALRaster(bytes) AS rast FROM t.dem_tiff;
+SELECT t.expect((SELECT ST_Width(rast) = 512 AND ST_SRID(rast) = 4326 AND ST_NumBands(rast) = 1 FROM t.dem_read), 'ST_FromGDALRaster releu o GTiff (driver ativo)');
+SELECT t.expect((SELECT ST_Value(r.rast, 1, 1, 1) = ST_Value(d.rast, 1, 1, 1) AND ST_Value(r.rast, 1, 300, 400) = ST_Value(d.rast, 1, 300, 400)
+                 FROM t.dem_read r, t.dem d), 'valores preservados no ida e volta GTiff');
+-- Ladrilhar em 256x256 (4 blocos) e inserir como o ingestor da API faz: fonte e blocos na mesma transação.
+INSERT INTO elevation_sources (tile_key, source, version, block_count) VALUES ('S21W048', 'copernicus-glo30', '2021_1', 4);
+INSERT INTO elevation_blocks (tile_key, rast) SELECT 'S21W048', ST_Tile(rast, 256, 256) FROM t.dem_read;
+SELECT t.expect((SELECT count(*) = 4 FROM elevation_blocks WHERE tile_key = 'S21W048'), 'ST_Tile gerou 4 blocos');
+-- Polígono que cruza a fronteira entre blocos (x = -47.1 + 256*0.0003 = -47.0232).
+CREATE TABLE t.clip_geom AS SELECT ST_GeomFromText('POLYGON((-47.03 -20.95, -47.03 -20.93, -47.01 -20.93, -47.01 -20.95, -47.03 -20.95))', 4326) AS geom;
+SELECT t.expect((SELECT count(*) >= 2 FROM elevation_blocks b, t.clip_geom g WHERE b.tile_key = 'S21W048' AND ST_Intersects(ST_ConvexHull(b.rast), g.geom)), 'recorte seleciona mais de um bloco');
+-- Soma de pixels do recorte nos blocos == recorte do raster inteiro (nenhum pixel perdido na fronteira).
+SELECT t.expect((SELECT sum(ST_Count(ST_Clip(b.rast, 1, g.geom, -9999, false), 1, true)) FROM elevation_blocks b, t.clip_geom g
+                 WHERE b.tile_key = 'S21W048' AND ST_Intersects(ST_ConvexHull(b.rast), g.geom))
+                = (SELECT ST_Count(ST_Clip(d.rast, 1, g.geom, -9999, false), 1, true) FROM t.dem d, t.clip_geom g), 'recorte por blocos == recorte do raster inteiro');
+SELECT t.expect((SELECT sum(ST_Count(ST_Clip(b.rast, 1, g.geom, -9999, false), 1, true)) > 0 FROM elevation_blocks b, t.clip_geom g
+                 WHERE b.tile_key = 'S21W048' AND ST_Intersects(ST_ConvexHull(b.rast), g.geom)), 'recorte tem pixels');
+-- ST_DumpValues devolve a janela de altitudes (a base do cálculo de declividade no Go).
+SELECT t.expect((SELECT array_length(ST_DumpValues(ST_Clip(b.rast, 1, g.geom, -9999, false), 1), 1) > 0 FROM elevation_blocks b, t.clip_geom g
+                 WHERE b.tile_key = 'S21W048' AND ST_Intersects(ST_ConvexHull(b.rast), g.geom) LIMIT 1), 'ST_DumpValues devolve valores');
+-- Constraints de elevação.
+SELECT t.expect_error($q$INSERT INTO elevation_sources (tile_key, source, version, block_count) VALUES ('s21w048', 'x', '1', 1)$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO elevation_sources (tile_key, source, version, block_count) VALUES ('S22W048', 'x', '1', 0)$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO elevation_sources (tile_key, source, version, block_count) VALUES ('S21W048', 'x', '1', 1)$q$, '23505');
+SELECT t.expect_error($q$INSERT INTO elevation_blocks (tile_key, rast) SELECT 'S99W099', rast FROM t.dem$q$, '23503');
+
+-- Relevo: fixtures. Talhão f1 e fazenda fd são da empresa A; fb é de B.
+INSERT INTO terrain_runs (id, company_id, farm_id, scope, requested_by)
+VALUES ('7a000000-0000-0000-0000-0000000000a1', 'a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'missing', '0a000000-0000-0000-0000-00000000000a');
+SELECT t.expect_error($q$INSERT INTO terrain_runs (company_id, farm_id, scope, requested_by)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fd000000-0000-0000-0000-0000000000fd', 'missing', '0b000000-0000-0000-0000-00000000000b')$q$, '23503'); -- fazenda de A com company_id B
+SELECT t.expect_error($q$INSERT INTO terrain_runs (company_id, farm_id, scope, requested_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'some', '0a000000-0000-0000-0000-00000000000a')$q$, '23514');
+
+INSERT INTO field_terrain (id, company_id, farm_id, field_id, status, run_id)
+VALUES ('7e000000-0000-0000-0000-0000000000e1', 'a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd',
+        'f1e10000-0000-0000-0000-0000000000f1', 'pending', '7a000000-0000-0000-0000-0000000000a1');
+SELECT t.expect_error($q$INSERT INTO field_terrain (company_id, farm_id, field_id, status)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', 'pending')$q$, '23505'); -- um relevo por talhão
+SELECT t.expect_error($q$INSERT INTO field_terrain (company_id, farm_id, field_id, status)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', 'pending')$q$, '23503'); -- talhão de outra empresa
+SELECT t.expect_error($q$INSERT INTO field_terrain (company_id, farm_id, field_id, status, run_id)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fb000000-0000-0000-0000-0000000000fb', 'f1e10000-0000-0000-0000-0000000000f1', 'pending', '7a000000-0000-0000-0000-0000000000a1')$q$, '23503'); -- talhão e execução de A com company_id B
+SELECT t.expect_error($q$UPDATE field_terrain SET status = 'done'$q$, '23514');
+SELECT t.expect_error($q$UPDATE field_terrain SET status = 'ready'$q$, '23514'); -- ready sem medidas
+SELECT t.expect_error($q$UPDATE field_terrain SET status = 'failed'$q$, '23514'); -- failed sem motivo
+SELECT t.expect_error($q$UPDATE field_terrain SET status = 'failed', failure_reason = '  '$q$, '23514');
+SELECT t.expect_error($q$UPDATE field_terrain SET position = 'peak'$q$, '23514');
+SELECT t.expect_error($q$UPDATE field_terrain SET aspect = 'up'$q$, '23514');
+SELECT t.expect_error($q$UPDATE field_terrain SET slope_mean_pct = -1$q$, '23514');
+SELECT t.expect_error($q$UPDATE field_terrain SET slope_mean_pct = 10, slope_max_pct = 5$q$, '23514'); -- máxima < média
+SELECT t.expect_error($q$UPDATE field_terrain SET elevation_min_m = 900, elevation_max_m = 800$q$, '23514');
+SELECT t.expect_error($q$UPDATE field_terrain SET slope_histogram_ha = array_fill(0::numeric, ARRAY[100])$q$, '23514'); -- tamanho errado
+SELECT t.expect_error($q$UPDATE field_terrain SET slope_histogram_ha = array_fill(0::numeric, ARRAY[102])$q$, '23514');
+SELECT t.expect_error($q$UPDATE field_terrain SET slope_histogram_ha = array_fill(-1::numeric, ARRAY[101])$q$, '23514'); -- negativo
+SELECT t.expect_error($q$UPDATE field_terrain SET slope_histogram_ha = array_fill(NULL::numeric, ARRAY[101])$q$, '23514'); -- elementos nulos
+SELECT t.expect_error($q$UPDATE field_terrain SET profile = '{}'::jsonb$q$, '23514');
+-- ready completo passa; failed com motivo também.
+UPDATE field_terrain SET status = 'ready', calculated_at = now(),
+    slope_mean_pct = 8.2, slope_p90_pct = 14.5, slope_max_pct = 22.1,
+    elevation_min_m = 801.5, elevation_max_m = 842.0, position = 'slope', aspect = 'southeast',
+    slope_histogram_ha = array_fill(0.04::numeric, ARRAY[101]), profile = '[{"d":0,"z":801.5},{"d":120,"z":842.0}]'::jsonb,
+    elevation_source = 'copernicus-glo30', elevation_resolution_m = 30, elevation_version = '2021_1'
+WHERE id = '7e000000-0000-0000-0000-0000000000e1';
+UPDATE field_terrain SET status = 'failed', failure_reason = 'bloco de elevacao indisponivel' WHERE id = '7e000000-0000-0000-0000-0000000000e1';
+
+-- Ajuste manual.
+SELECT t.expect_error($q$INSERT INTO field_terrain_adjustments (company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'f1e10000-0000-0000-0000-0000000000f1', 'topographic_survey', 5, 9, 'slope', 'x', '0b000000-0000-0000-0000-00000000000b')$q$, '23503'); -- talhão de A com company_id B
+SELECT t.expect_error($q$INSERT INTO field_terrain_adjustments (company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'f1e10000-0000-0000-0000-0000000000f1', 'topographic_survey', 12, 9, 'slope', 'x', '0a000000-0000-0000-0000-00000000000a')$q$, '23514'); -- máxima < média
+SELECT t.expect_error($q$INSERT INTO field_terrain_adjustments (company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'f1e10000-0000-0000-0000-0000000000f1', 'topographic_survey', 5, 101, 'slope', 'x', '0a000000-0000-0000-0000-00000000000a')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO field_terrain_adjustments (company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'f1e10000-0000-0000-0000-0000000000f1', 'topographic_survey', 5, 9, 'slope', '   ', '0a000000-0000-0000-0000-00000000000a')$q$, '23514'); -- justificativa vazia
+SELECT t.expect_error($q$INSERT INTO field_terrain_adjustments (company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'f1e10000-0000-0000-0000-0000000000f1', 'topographic_survey', 5, 9, 'slope', repeat('x', 1001), '0a000000-0000-0000-0000-00000000000a')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO field_terrain_adjustments (company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'f1e10000-0000-0000-0000-0000000000f1', 'guess', 5, 9, 'slope', 'x', '0a000000-0000-0000-0000-00000000000a')$q$, '23514');
+INSERT INTO field_terrain_adjustments (id, company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+VALUES ('ad000000-0000-0000-0000-0000000000a1', 'a0000000-0000-0000-0000-00000000000a', 'f1e10000-0000-0000-0000-0000000000f1', 'field_assessment', 5, 9, 'slope', 'Terracos nao vistos no MDE', '0a000000-0000-0000-0000-00000000000a');
+SELECT t.expect_error($q$INSERT INTO field_terrain_adjustments (company_id, field_id, origin, slope_mean_pct, slope_max_pct, position, justification, adjusted_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'f1e10000-0000-0000-0000-0000000000f1', 'field_assessment', 5, 9, 'slope', 'outro', '0a000000-0000-0000-0000-00000000000a')$q$, '23505'); -- um ajuste por talhão
+
+-- ---------------------------------------------------------------------------
+-- Chuva, solo e trafegabilidade (migrações 000022 e 000023)
+-- ---------------------------------------------------------------------------
+-- Textura do solo: enum ou nula.
+UPDATE fields SET soil_texture = 'clay' WHERE id = 'f1e10000-0000-0000-0000-0000000000f1';
+SELECT t.expect_error($q$UPDATE fields SET soil_texture = 'loam'$q$, '23514');
+-- Talhões de outra fazenda da mesma empresa (fa) e de outra empresa (fb).
+INSERT INTO fields (id, company_id, farm_id, crop_code, name, polygon) VALUES
+    ('f1e20000-0000-0000-0000-0000000000f2', 'a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa',
+     'corn', 'Talhao FA', ST_GeomFromText('POLYGON((-46.0 -21.0, -46.0 -20.998, -45.998 -20.998, -45.998 -21.0, -46.0 -21.0))', 4326)),
+    ('f1e30000-0000-0000-0000-0000000000f3', 'b0000000-0000-0000-0000-00000000000b', 'fb000000-0000-0000-0000-0000000000fb',
+     'corn', 'Talhao FB', ST_GeomFromText('POLYGON((-48.0 -21.0, -48.0 -20.998, -47.998 -20.998, -47.998 -21.0, -48.0 -21.0))', 4326));
+-- Pluviômetros: um na fazenda fd e um na fa (empresa A), um na fb (empresa B).
+INSERT INTO rain_gauges (id, company_id, farm_id, name, location) VALUES
+    ('9a000000-0000-0000-0000-0000000000a1', 'a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'Sede', ST_SetSRID(ST_MakePoint(-47.0, -21.0), 4326)),
+    ('9a000000-0000-0000-0000-0000000000a2', 'a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', 'Sede', NULL),
+    ('9b000000-0000-0000-0000-0000000000b1', 'b0000000-0000-0000-0000-00000000000b', 'fb000000-0000-0000-0000-0000000000fb', 'Sede', NULL);
+SELECT t.expect_error($q$INSERT INTO rain_gauges (company_id, farm_id, name)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'SEDE')$q$, '23505'); -- nome repetido sem caixa
+SELECT t.expect_error($q$INSERT INTO rain_gauges (company_id, farm_id, name)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fd000000-0000-0000-0000-0000000000fd', 'X')$q$, '23503'); -- fazenda de A com company_id B
+SELECT t.expect_error($q$INSERT INTO rain_gauges (company_id, farm_id, name)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', '   ')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO rain_gauges (company_id, farm_id, name)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', repeat('x', 101))$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO rain_gauges (company_id, farm_id, name, location)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'Y', ST_SetSRID(ST_MakePoint(-47.0, -21.0), 3857))$q$, '22023'); -- SRID errado
+-- Soft delete libera o nome.
+INSERT INTO rain_gauges (id, company_id, farm_id, name, deleted_at)
+VALUES ('9a000000-0000-0000-0000-0000000000a9', 'a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'sede', now());
+-- Vínculo talhão -> pluviômetro: mesma empresa E mesma fazenda, um por talhão.
+INSERT INTO rain_gauge_fields (company_id, farm_id, field_id, rain_gauge_id)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '9a000000-0000-0000-0000-0000000000a1');
+SELECT t.expect_error($q$INSERT INTO rain_gauge_fields (company_id, farm_id, field_id, rain_gauge_id)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', 'f1e20000-0000-0000-0000-0000000000f2', '9a000000-0000-0000-0000-0000000000a1')$q$, '23503'); -- pluviômetro de outra fazenda
+SELECT t.expect_error($q$INSERT INTO rain_gauge_fields (company_id, farm_id, field_id, rain_gauge_id)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e20000-0000-0000-0000-0000000000f2', '9a000000-0000-0000-0000-0000000000a1')$q$, '23503'); -- talhão de outra fazenda
+SELECT t.expect_error($q$INSERT INTO rain_gauge_fields (company_id, farm_id, field_id, rain_gauge_id)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fb000000-0000-0000-0000-0000000000fb', 'f1e30000-0000-0000-0000-0000000000f3', '9a000000-0000-0000-0000-0000000000a1')$q$, '23503'); -- pluviômetro de outra empresa
+SELECT t.expect_error($q$INSERT INTO rain_gauge_fields (company_id, farm_id, field_id, rain_gauge_id)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', '9a000000-0000-0000-0000-0000000000a9')$q$, '23505'); -- segundo vínculo do talhão
+-- Leituras: uma por pluviômetro e horário, faixa física, tenant.
+INSERT INTO rain_readings (company_id, rain_gauge_id, rain_mm, observed_at, recorded_by)
+VALUES ('a0000000-0000-0000-0000-00000000000a', '9a000000-0000-0000-0000-0000000000a1', 18.5, '2026-11-26T10:00:00Z', '0a000000-0000-0000-0000-00000000000a');
+SELECT t.expect_error($q$INSERT INTO rain_readings (company_id, rain_gauge_id, rain_mm, observed_at, recorded_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', '9a000000-0000-0000-0000-0000000000a1', 2, '2026-11-26T07:00:00-03:00', '0a000000-0000-0000-0000-00000000000a')$q$, '23505'); -- mesmo instante
+SELECT t.expect_error($q$INSERT INTO rain_readings (company_id, rain_gauge_id, rain_mm, observed_at, recorded_by)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', '9a000000-0000-0000-0000-0000000000a1', 2, now(), '0a000000-0000-0000-0000-00000000000a')$q$, '23503'); -- pluviômetro de A com company_id B
+SELECT t.expect_error($q$INSERT INTO rain_readings (company_id, rain_gauge_id, rain_mm, observed_at, recorded_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', '9a000000-0000-0000-0000-0000000000a1', -0.1, now(), '0a000000-0000-0000-0000-00000000000a')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO rain_readings (company_id, rain_gauge_id, rain_mm, observed_at, recorded_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', '9a000000-0000-0000-0000-0000000000a1', 500.01, now(), '0a000000-0000-0000-0000-00000000000a')$q$, '23514');
+-- Vistorias: estado conhecido, talhão da mesma empresa e fazenda, nota curta.
+INSERT INTO soil_inspections (company_id, farm_id, field_id, state, inspected_at, inspected_by, note)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', 'moist', now(), '0a000000-0000-0000-0000-00000000000a', 'barro na baixada');
+SELECT t.expect_error($q$INSERT INTO soil_inspections (company_id, farm_id, field_id, state, inspected_at, inspected_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', 'unknown', now(), '0a000000-0000-0000-0000-00000000000a')$q$, '23514');
+SELECT t.expect_error($q$INSERT INTO soil_inspections (company_id, farm_id, field_id, state, inspected_at, inspected_by)
+    VALUES ('b0000000-0000-0000-0000-00000000000b', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', 'dry', now(), '0a000000-0000-0000-0000-00000000000a')$q$, '23503'); -- talhão de A com company_id B
+SELECT t.expect_error($q$INSERT INTO soil_inspections (company_id, farm_id, field_id, state, inspected_at, inspected_by)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', 'f1e10000-0000-0000-0000-0000000000f1', 'dry', now(), '0a000000-0000-0000-0000-00000000000a')$q$, '23503'); -- talhão em outra fazenda
+SELECT t.expect_error($q$INSERT INTO soil_inspections (company_id, farm_id, field_id, state, inspected_at, inspected_by, note)
+    VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', 'dry', now(), '0a000000-0000-0000-0000-00000000000a', '  ')$q$, '23514');
+-- Limites: semeados como heurística; faixas crescentes; uma linha por textura e vigência.
+SELECT t.expect((SELECT count(*) = 3 AND bool_and(source = 'heuristic') FROM trafficability_thresholds), 'seed de limites heuristicos');
+SELECT t.expect((SELECT field_capacity_m3m3 = 0.360 FROM trafficability_thresholds WHERE soil_texture = 'clay'), 'capacidade de campo do argiloso');
+SELECT t.expect_error($q$INSERT INTO trafficability_thresholds (soil_texture, effective_from, rain_48h_dry_mm, rain_48h_ideal_mm, rain_48h_moist_mm,
+    moisture_dry_pct, moisture_ideal_pct, moisture_moist_pct, rain_72h_factor, drying_rate_mm_per_day, field_capacity_m3m3, source)
+    VALUES ('clay', '2027-01-01', 2, 15, 8, 60, 90, 100, 1.5, 6, 0.36, 'calibrated')$q$, '23514'); -- faixa decrescente
+SELECT t.expect_error($q$INSERT INTO trafficability_thresholds (soil_texture, effective_from, rain_48h_dry_mm, rain_48h_ideal_mm, rain_48h_moist_mm,
+    moisture_dry_pct, moisture_ideal_pct, moisture_moist_pct, rain_72h_factor, drying_rate_mm_per_day, field_capacity_m3m3, source)
+    VALUES ('clay', '2026-11-26', 2, 8, 15, 60, 90, 100, 1.5, 6, 0.36, 'calibrated')$q$, '23505'); -- mesma vigência
+SELECT t.expect_error($q$INSERT INTO trafficability_thresholds (soil_texture, effective_from, rain_48h_dry_mm, rain_48h_ideal_mm, rain_48h_moist_mm,
+    moisture_dry_pct, moisture_ideal_pct, moisture_moist_pct, rain_72h_factor, drying_rate_mm_per_day, field_capacity_m3m3, source)
+    VALUES ('clay', '2027-01-01', 2, 8, 15, 60, 90, 100, 1.5, 6, 1.2, 'calibrated')$q$, '23514'); -- capacidade acima de 1
+SELECT t.expect_error($q$INSERT INTO trafficability_thresholds (soil_texture, effective_from, rain_48h_dry_mm, rain_48h_ideal_mm, rain_48h_moist_mm,
+    moisture_dry_pct, moisture_ideal_pct, moisture_moist_pct, rain_72h_factor, drying_rate_mm_per_day, field_capacity_m3m3, source)
+    VALUES ('clay', '2027-01-01', 2, 8, 15, 60, 90, 100, 1.5, 6, 0.36, 'guess')$q$, '23514'); -- origem desconhecida
+
 -- ---------------------------------------------------------------------------
 -- Estrutura (catálogo)
 -- ---------------------------------------------------------------------------
@@ -230,18 +471,64 @@ SELECT t.expect_error('DELETE FROM public.users', '42501');
 SELECT t.expect_error('DELETE FROM public.companies', '42501');
 SELECT t.expect_error('DELETE FROM public.farms', '42501');
 SELECT t.expect_error('DELETE FROM public.invitations', '42501');
+SELECT t.expect_error('DELETE FROM public.owners', '42501');
+SELECT t.expect_error('DELETE FROM public.fields', '42501');
+SELECT t.expect_error('DELETE FROM public.owner_documents', '42501');
 SELECT t.expect_error('TRUNCATE public.users', '42501');
 -- Catálogo de referência: só leitura
 SELECT t.expect((SELECT count(*) FROM crops) = 6, 'api_app le crops');
 SELECT t.expect_error('INSERT INTO public.crops (code, name) VALUES (''x'', ''X'')', '42501');
 SELECT t.expect_error('UPDATE public.crops SET name = ''X''', '42501');
 SELECT t.expect_error('DELETE FROM public.crops', '42501');
+SELECT t.expect((SELECT count(*) FROM municipalities) = 0, 'api_app le municipalities (nasce vazia)');
+SELECT t.expect_error($q$INSERT INTO public.municipalities (ibge_code, name, state, boundary)
+    VALUES ('3128709', 'X', 'MG', ST_GeomFromText('MULTIPOLYGON(((0 0, 0 1, 1 1, 0 0)))', 4326))$q$, '42501');
+SELECT t.expect_error('DELETE FROM public.municipalities', '42501');
+-- Relevo: elevação é referência global (insere e lê; nunca reescreve nem apaga); relevo sem DELETE
+SELECT t.expect((SELECT count(*) = 4 FROM elevation_blocks), 'api_app le elevation_blocks');
+SELECT t.expect_error('UPDATE public.elevation_blocks SET tile_key = tile_key', '42501');
+SELECT t.expect_error('DELETE FROM public.elevation_blocks', '42501');
+SELECT t.expect_error('DELETE FROM public.elevation_sources', '42501');
+SELECT t.expect_error('UPDATE public.elevation_sources SET version = ''x''', '42501');
+SELECT t.expect_error('DELETE FROM public.field_terrain', '42501');
+SELECT t.expect_error('DELETE FROM public.terrain_runs', '42501');
+SELECT t.expect_error('TRUNCATE public.field_terrain', '42501');
+INSERT INTO elevation_sources (tile_key, source, version, block_count) VALUES ('S22W048', 'copernicus-glo30', '2021_1', 1);
+INSERT INTO elevation_blocks (tile_key, rast) SELECT 'S22W048', ST_Tile(ST_AddBand(ST_MakeEmptyRaster(256, 256, -48, -21, 0.0003, -0.0003, 0, 0, 4326), '32BF'::text, 0, -9999), 256, 256);
+-- Chuva e solo: leituras e vistorias não se apagam nem se reescrevem; pluviômetro só soft delete;
+-- limites são referência (só leitura); o vínculo do talhão é substituído.
+SELECT t.expect((SELECT count(*) = 3 FROM trafficability_thresholds), 'api_app le trafficability_thresholds');
+SELECT t.expect_error('UPDATE public.trafficability_thresholds SET source = ''calibrated''', '42501');
+SELECT t.expect_error('DELETE FROM public.trafficability_thresholds', '42501');
+SELECT t.expect_error($q$INSERT INTO public.trafficability_thresholds (soil_texture, effective_from, rain_48h_dry_mm, rain_48h_ideal_mm, rain_48h_moist_mm,
+    moisture_dry_pct, moisture_ideal_pct, moisture_moist_pct, rain_72h_factor, drying_rate_mm_per_day, field_capacity_m3m3, source)
+    VALUES ('clay', '2027-01-01', 2, 8, 15, 60, 90, 100, 1.5, 6, 0.36, 'calibrated')$q$, '42501');
+SELECT t.expect_error('UPDATE public.rain_readings SET rain_mm = 0', '42501');
+SELECT t.expect_error('DELETE FROM public.rain_readings', '42501');
+SELECT t.expect_error('UPDATE public.soil_inspections SET state = ''dry''', '42501');
+SELECT t.expect_error('DELETE FROM public.soil_inspections', '42501');
+SELECT t.expect_error('DELETE FROM public.rain_gauges', '42501');
+SELECT t.expect_error('TRUNCATE public.rain_gauge_fields', '42501');
+INSERT INTO rain_readings (company_id, rain_gauge_id, rain_mm, observed_at, recorded_by)
+VALUES ('a0000000-0000-0000-0000-00000000000a', '9a000000-0000-0000-0000-0000000000a1', 0, '2026-11-26T11:00:00Z', '0a000000-0000-0000-0000-00000000000a');
+INSERT INTO soil_inspections (company_id, farm_id, field_id, state, inspected_at, inspected_by)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fd000000-0000-0000-0000-0000000000fd', 'f1e10000-0000-0000-0000-0000000000f1', 'ideal', now(), '0a000000-0000-0000-0000-00000000000a');
+UPDATE rain_gauges SET name = 'Sede nova', updated_at = now(), version = version + 1 WHERE id = '9a000000-0000-0000-0000-0000000000a1';
+UPDATE fields SET soil_texture = 'medium' WHERE id = 'f1e10000-0000-0000-0000-0000000000f1';
+DELETE FROM rain_gauge_fields WHERE field_id = 'f1e10000-0000-0000-0000-0000000000f1';
+SELECT t.expect((SELECT count(*) = 0 FROM rain_gauge_fields), 'api_app removeu o vinculo');
+-- O ajuste manual PODE ser removido de verdade (volta ao valor calculado).
+DELETE FROM field_terrain_adjustments WHERE id = 'ad000000-0000-0000-0000-0000000000a1';
+SELECT t.expect((SELECT count(*) = 0 FROM field_terrain_adjustments), 'api_app removeu o ajuste');
 -- DML do dia a dia funciona
 UPDATE users SET last_access_at = now(), updated_at = now(), version = version + 1 WHERE id = '0a000000-0000-0000-0000-00000000000a';
 DELETE FROM auth_sessions WHERE user_id = '0a000000-0000-0000-0000-00000000000a';
 INSERT INTO user_farm_access (user_id, farm_id, company_id)
 VALUES ('0b000000-0000-0000-0000-00000000000b', 'fb000000-0000-0000-0000-0000000000fb', 'b0000000-0000-0000-0000-00000000000b');
 DELETE FROM user_farm_access;
+INSERT INTO farm_owners (company_id, farm_id, owner_id, role, share_percent)
+VALUES ('a0000000-0000-0000-0000-00000000000a', 'fa000000-0000-0000-0000-0000000000fa', '0a0a0000-0000-0000-0000-00000000000a', 'owner', 100);
+DELETE FROM farm_owners; -- substituir vínculos apaga e regrava
 -- Sequência da identity de audit_events utilizável (já provado pelo INSERT acima).
 
 RESET ROLE;

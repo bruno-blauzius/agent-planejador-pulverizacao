@@ -1,0 +1,6 @@
+# Copie para terraform.tfvars (não versionado) e ajuste.
+name_prefix = "<prefixo-unico>"
+# region                            = "sa-east-1"
+# noncurrent_version_retention_days = 30
+# api_role_name                     = "<papel-iam-da-api>"
+# access_log_bucket                 = "<bucket-de-logs>"

@@ -16,9 +16,18 @@ export const ROLE_PERMISSIONS: Readonly<Record<UserRole, readonly Permission[]>>
     'applications.register',
     'applications.confirm',
     'planner.use',
+    'field_conditions.record',
   ],
-  admin: ['dashboard.view', 'users.manage', 'registry.write', 'applications.register', 'applications.confirm', 'planner.use'],
-  planning_operator: ['applications.register', 'planner.use'],
+  admin: [
+    'dashboard.view',
+    'users.manage',
+    'registry.write',
+    'applications.register',
+    'applications.confirm',
+    'planner.use',
+    'field_conditions.record',
+  ],
+  planning_operator: ['applications.register', 'planner.use', 'field_conditions.record'],
 }
 
 /** Who is calling, as the API would read it from the token. */

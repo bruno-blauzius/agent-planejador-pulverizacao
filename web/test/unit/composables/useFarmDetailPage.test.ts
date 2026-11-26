@@ -31,9 +31,10 @@ describe('useFarmDetailPage', () => {
     expect(page.header.value.title).toBe('Fazenda Santa Rita')
     expect(page.header.value.breadcrumbs).toEqual([{ label: 'Fazendas', to: '/farms' }, { label: 'Fazenda Santa Rita' }])
     expect(page.tabs.value).toEqual([
-      { value: 'overview', label: 'Visão geral', count: null, disabled: true },
+      { value: 'overview', label: 'Visão geral', count: null, disabled: false },
       { value: 'fields', label: 'Áreas e talhões', count: 9, disabled: false },
-      { value: 'owners', label: 'Proprietários', count: 2, disabled: true },
+      { value: 'terrain', label: 'Terreno', count: null, disabled: false },
+      { value: 'owners', label: 'Proprietários', count: 2, disabled: false },
       { value: 'applications', label: 'Aplicações', count: null, disabled: true },
       { value: 'windows', label: 'Janelas de pulverização', count: null, disabled: true },
     ])
@@ -42,10 +43,35 @@ describe('useFarmDetailPage', () => {
   })
 
   it('keeps the fields tab when a disabled tab is chosen', () => {
-    setup()
+    const fakes = setup()
     const page = useFarmDetailPage('farm-santa-rita', { now: NOW })
-    page.tab.value = 'owners'
+    page.tab.value = 'applications'
     expect(page.tab.value).toBe('fields')
+    fakes.route.query = { tab: 'windows' }
+    expect(page.tab.value).toBe('fields')
+  })
+
+  it('switches to the overview and owners tabs through the query', async () => {
+    const fakes = setup()
+    const page = useFarmDetailPage('farm-santa-rita', { now: NOW })
+    await flushPromises()
+
+    page.tab.value = 'overview'
+    await flushPromises()
+    expect(fakes.route.query).toEqual({ tab: 'overview' })
+    expect(page.tab.value).toBe('overview')
+    expect(page.overview.value.map(section => section.title)).toEqual(['Identificação', 'Localização', 'Áreas e culturas'])
+    expect(page.overview.value[0]?.facts[0]).toEqual({ label: 'Nome', value: 'Fazenda Santa Rita', isEmpty: false })
+
+    page.tab.value = 'owners'
+    await flushPromises()
+    expect(page.tab.value).toBe('owners')
+    expect(page.ownerRows.value).toHaveLength(2)
+    expect(page.ownerRows.value[0]?.to).toMatch(/^\/owners\?owner=/)
+
+    page.tab.value = 'fields'
+    await flushPromises()
+    expect(fakes.route.query).toEqual({})
   })
 
   it('lists blocks with rows sharing colors with the map and the legend', async () => {

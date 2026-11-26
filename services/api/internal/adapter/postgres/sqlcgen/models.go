@@ -62,6 +62,20 @@ type Crop struct {
 	CreatedAt time.Time
 }
 
+type ElevationBlock struct {
+	ID      int64
+	TileKey string
+	Rast    interface{}
+}
+
+type ElevationSource struct {
+	TileKey    string
+	Source     string
+	Version    string
+	FetchedAt  time.Time
+	BlockCount int32
+}
+
 type Farm struct {
 	ID              string
 	CompanyID       string
@@ -83,6 +97,77 @@ type Farm struct {
 	Version         int32
 }
 
+type FarmOwner struct {
+	CompanyID    string
+	FarmID       string
+	OwnerID      string
+	Role         string
+	SharePercent pgtype.Numeric
+	CreatedAt    time.Time
+}
+
+type Field struct {
+	ID            string
+	CompanyID     string
+	FarmID        string
+	CropCode      string
+	Name          string
+	Block         pgtype.Text
+	Variety       pgtype.Text
+	Season        pgtype.Text
+	PlantingDate  pgtype.Date
+	RowSpacingM   pgtype.Numeric
+	PlantSpacingM pgtype.Numeric
+	Polygon       interface{}
+	AreaHa        pgtype.Numeric
+	DeletedAt     *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Version       int32
+	SoilTexture   pgtype.Text
+}
+
+type FieldTerrain struct {
+	ID                   string
+	CompanyID            string
+	FarmID               string
+	FieldID              string
+	Status               string
+	FailureReason        pgtype.Text
+	RunID                *string
+	RequestedAt          time.Time
+	CalculatedAt         *time.Time
+	SlopeMeanPct         pgtype.Numeric
+	SlopeP90Pct          pgtype.Numeric
+	SlopeMaxPct          pgtype.Numeric
+	ElevationMinM        pgtype.Numeric
+	ElevationMaxM        pgtype.Numeric
+	Position             pgtype.Text
+	Aspect               pgtype.Text
+	SlopeHistogramHa     []pgtype.Numeric
+	Profile              []byte
+	ElevationSource      pgtype.Text
+	ElevationResolutionM pgtype.Numeric
+	ElevationVersion     pgtype.Text
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	Version              int32
+}
+
+type FieldTerrainAdjustment struct {
+	ID            string
+	CompanyID     string
+	FieldID       string
+	Origin        string
+	SlopeMeanPct  pgtype.Numeric
+	SlopeMaxPct   pgtype.Numeric
+	Position      string
+	Justification string
+	AdjustedBy    string
+	AdjustedAt    time.Time
+	Version       int32
+}
+
 type Invitation struct {
 	ID              string
 	CompanyID       string
@@ -96,6 +181,114 @@ type Invitation struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	AccountCreated  bool
+}
+
+type Municipality struct {
+	IbgeCode string
+	Name     string
+	State    string
+	Boundary interface{}
+	LoadedAt time.Time
+}
+
+type Owner struct {
+	ID                  string
+	CompanyID           string
+	PersonType          string
+	Name                string
+	Document            string
+	BirthDate           pgtype.Date
+	Phone               pgtype.Text
+	Email               pgtype.Text
+	WindowAlertsEnabled bool
+	DeletedAt           *time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	Version             int32
+	DocumentsPending    bool
+}
+
+type OwnerDocument struct {
+	ID               string
+	CompanyID        string
+	OwnerID          string
+	Kind             string
+	FileName         string
+	ContentType      string
+	SizeBytes        int64
+	StorageKey       string
+	UploadedByUserID string
+	UploadedAt       time.Time
+	DeletedAt        *time.Time
+}
+
+type RainGauge struct {
+	ID        string
+	CompanyID string
+	FarmID    string
+	Name      string
+	Location  interface{}
+	DeletedAt *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Version   int32
+}
+
+type RainGaugeField struct {
+	CompanyID   string
+	FarmID      string
+	FieldID     string
+	RainGaugeID string
+	LinkedAt    time.Time
+}
+
+type RainReading struct {
+	ID          string
+	CompanyID   string
+	RainGaugeID string
+	RainMm      pgtype.Numeric
+	ObservedAt  time.Time
+	RecordedBy  string
+	RecordedAt  time.Time
+}
+
+type SoilInspection struct {
+	ID          string
+	CompanyID   string
+	FarmID      string
+	FieldID     string
+	State       string
+	InspectedAt time.Time
+	InspectedBy string
+	Note        pgtype.Text
+	RecordedAt  time.Time
+}
+
+type TerrainRun struct {
+	ID          string
+	CompanyID   string
+	FarmID      string
+	Scope       string
+	RequestedBy string
+	RequestedAt time.Time
+	FinishedAt  *time.Time
+}
+
+type TrafficabilityThreshold struct {
+	ID                 string
+	SoilTexture        string
+	EffectiveFrom      pgtype.Date
+	Rain48hDryMm       pgtype.Numeric
+	Rain48hIdealMm     pgtype.Numeric
+	Rain48hMoistMm     pgtype.Numeric
+	MoistureDryPct     pgtype.Numeric
+	MoistureIdealPct   pgtype.Numeric
+	MoistureMoistPct   pgtype.Numeric
+	Rain72hFactor      pgtype.Numeric
+	DryingRateMmPerDay pgtype.Numeric
+	FieldCapacityM3m3  pgtype.Numeric
+	Source             string
+	CreatedAt          time.Time
 }
 
 type User struct {

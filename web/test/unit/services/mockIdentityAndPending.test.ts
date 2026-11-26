@@ -64,23 +64,31 @@ describe('mock companies: get and remove', () => {
 })
 
 describe('createPendingMockServices (real API + mock for the endpoints still planned)', () => {
-  it('keeps the real services for session, users, companies and profile', () => {
+  it('keeps the real services for session, users, companies, profile, farms, fields, crops and owners', () => {
     const real = createSsoRealServices()
     const merged = createPendingMockServices(real, { latencyMs: 0, getRole: () => 'admin' })
 
-    for (const key of ['auth', 'users', 'companies', 'profile'] as const) expect(merged[key]).toBe(real[key])
+    for (const key of ['auth', 'users', 'companies', 'profile', 'farms', 'fields', 'crops', 'owners'] as const) expect(merged[key]).toBe(real[key])
     for (const key of PENDING_SERVICE_KEYS) expect(merged[key]).not.toBe(real[key])
+  })
+
+  it('serves the relief from the real API (ADR 0021): terrain is no longer a pending service', () => {
+    const real = createSsoRealServices()
+    const merged = createPendingMockServices(real, { latencyMs: 0, getRole: () => 'admin' })
+
+    expect(PENDING_SERVICE_KEYS).not.toContain('terrain')
+    expect(merged.terrain).toBe(real.terrain)
   })
 
   it.each(Object.entries(MOCK_USER_BY_ROLE) as [UserRole, string][])('acts as the seed user of the %s role', async (role, userId) => {
     const merged = createPendingMockServices(createSsoRealServices(), { latencyMs: 0, getRole: () => role })
-    const farms = await merged.farms.list()
-    const direct = await worldAs(userId).farms.list()
-    expect(farms.items.map(farm => farm.id)).toEqual(direct.items.map(farm => farm.id))
+    const applications = await merged.applications.list()
+    const direct = await worldAs(userId).applications.list()
+    expect(applications.items.map(item => item.id)).toEqual(direct.items.map(item => item.id))
   })
 
   it('is unauthenticated for the mock while there is no signed-in user', async () => {
     const merged = createPendingMockServices(createSsoRealServices(), { latencyMs: 0, getRole: () => null })
-    expect((await rejection(merged.farms.list())).code).toBe('unauthorized')
+    expect((await rejection(merged.applications.list())).code).toBe('unauthorized')
   })
 })

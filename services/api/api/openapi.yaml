@@ -16,19 +16,51 @@ tags:
   - name: Auth
     description: Login e sessão pelo SSO Inceres (Keycloak), com a API como cliente OIDC (ADR 0015). **Implementado**, exceto o `POST /auth/login` do mock, obsoleto e ainda marcado com `x-status` = planned (ver ADR 0010).
   - name: Farms
-    description: Cadastro de fazendas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+    description: |
+      Cadastro de fazendas da empresa do usuário (ADR 0013). **Implementado**. Ler não exige capacidade; criar,
+      editar e importar perímetro exigem `registry.write`. O operador de planejamento só enxerga as fazendas do
+      seu `farm_scope` (fora dele, 404). `field_count`, `productive_area_ha` e `crops` vêm dos talhões;
+      `spray_outlook` continua nulo até a integração com o planejador. `pending` é calculado: fazenda ativa com
+      algum vinculado sem o documento obrigatório (ADR 0020).
   - name: Fields
-    description: Talhões de uma fazenda. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+    description: |
+      Talhões de uma fazenda. **Implementado**. Ler não exige capacidade; cadastrar e editar exigem `registry.write`.
+      A fazenda precisa ter perímetro com área; o talhão tem área própria (mínimo `API_FIELD_MIN_AREA_HA`), fica dentro
+      do perímetro e não sobrepõe outro talhão da fazenda, com tolerância de desenho `API_FIELD_GEOMETRY_TOLERANCE_M2`.
+      `spray_condition` e `last_application_at` continuam nulos até a integração com o planejador e as aplicações.
+  - name: Terrain
+    description: |
+      Relevo dos talhões calculado a partir de modelo digital de elevação, ajuste manual e compatibilidade dos
+      métodos de aplicação com a declividade (ADR 0021). **Implementado**. Ler não exige
+      capacidade; calcular e ajustar exigem `registry.write`.
+
+      O modelo tem 30 m de resolução e o cálculo exige um mínimo de células com declividade
+      (`API_TERRAIN_MIN_VALID_CELLS`, padrão 20, cerca de 1,8 ha). Talhão menor que isso, ou sobre células sem
+      dado, termina com `status` = `failed` e o motivo "dados de elevação insuficientes"; para ele só vale o
+      ajuste manual. Os cálculos de todas as empresas entram numa única fila (FIFO): uma execução grande atrasa
+      as demais. Um cálculo que ficou preso (processo caído) volta para a fila quando o prazo do executor vence.
   - name: Owners
-    description: Proprietários (pessoa física ou jurídica) e vínculos com fazendas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+    description: |
+      Proprietários (pessoa física ou jurídica) e vínculos com fazendas, da empresa do usuário. **Implementado**.
+      Ler não exige capacidade; escrever exige `registry.write`. O operador de planejamento só enxerga os
+      proprietários vinculados às fazendas do seu `farm_scope`, e só esses vínculos. Documentos (RG, CNH,
+      contrato social) ficam no S3 (ADR 0020): enviar e remover exigem `registry.write`; baixar, não.
   - name: Crops
-    description: Catálogo de culturas. **Ainda não implementado** (marcado com `x-status` = planned; ver ADR 0010).
+    description: Catálogo global de culturas (igual para todas as empresas). **Implementado**.
   - name: Users
     description: Usuários, papéis, convites, inativação e exclusão lógica (ADR 0013 e 0015). **Implementado**.
   - name: Companies
     description: Empresas clientes, gestão do super admin (ADR 0013). **Implementado**.
   - name: Profile
     description: Perfil do usuário autenticado (ADR 0013). **Implementado**, exceto `POST /me/password` (obsoleto, só mock).
+  - name: Trafficability
+    description: |
+      Chuva, estado do solo e métodos de aplicação elegíveis por dia no talhão (ADR 0022). **Implementado**
+      (fase 2): pluviômetros da fazenda e leituras, vistoria e perfil de solo do talhão, e a trafegabilidade
+      calculada com a chuva medida, o modelo Open-Meteo e o relevo. Ler não exige capacidade; cadastrar
+      pluviômetro e definir o perfil de solo exigem `registry.write`; lançar leitura e vistoria exigem
+      `field_conditions.record`. Só a API calcula o estado do solo; tela e agente consomem o mesmo veredito.
+      Os limites por textura vêm da tabela de referência e ainda são heurísticos (`thresholds_source`).
   - name: Dashboard
     description: Painel do administrador (ADR 0013). **Ainda não implementado** (planned).
   - name: Planner
@@ -388,20 +420,25 @@ paths:
     get:
       tags: [Farms]
       operationId: listFarms
-      x-status: planned
+      x-status: implemented
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Lista fazendas
-      description: Ainda não implementado. Lista paginada de fazendas visíveis ao usuário.
+      description: Lista paginada de fazendas visíveis ao usuário, ordenada por nome.
       parameters:
         - name: search
           in: query
-          description: Busca por nome, código ou município (sem diferenciar maiúsculas e acentos).
+          description: |
+            Busca por nome, código ou município, sem diferenciar maiúsculas nem acentos ("guaxupe" encontra
+            "Guaxupé"; ADR 0017).
           schema:
             type: string
         - name: status
           in: query
+          description: |
+            `active` traz só as ativas sem pendência; `pending`, as ativas com algum vinculado sem o documento
+            obrigatório.
           schema:
             $ref: "#/components/schemas/FarmStatus"
         - name: production_type
@@ -424,15 +461,20 @@ paths:
     post:
       tags: [Farms]
       operationId: createFarm
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Cadastra fazenda
       description: |
-        Ainda não implementado. Cria a fazenda (assistente de 4 passos). Com `status: draft`
-        os campos de localização e proprietários podem faltar; com `status: active` a API
-        exige perímetro e participações de proprietários somando 100%.
+        Cria a fazenda e seus vínculos (assistente de 4 passos), numa transação. Com `status: draft`
+        os campos de localização e proprietários podem faltar, mas a soma das participações nunca passa
+        de 100%; com `status: active` a API exige perímetro e participações de proprietários (papel `owner`)
+        somando exatamente 100%. Participação aceita até duas casas decimais. Sem `forecast_point`, a API
+        usa o centróide do perímetro. Proprietário inexistente ou de outra empresa: 422 em `owners[i].owner_id`.
+        Perímetro com autointerseção ou menor que `API_FARM_MIN_AREA_HA` (a fazenda precisa ter área em
+        hectares): 422 em `location.perimeter`.
       requestBody:
         required: true
         content:
@@ -448,6 +490,8 @@ paths:
                 $ref: "#/components/schemas/Farm"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/ValidationFailed"
         "500":
@@ -458,12 +502,12 @@ paths:
     get:
       tags: [Farms]
       operationId: getFarm
-      x-status: planned
+      x-status: implemented
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Detalhe da fazenda
-      description: Ainda não implementado.
+      description: Fazenda com a geometria completa do perímetro em `location.perimeter`.
       responses:
         "200":
           description: Fazenda.
@@ -480,12 +524,16 @@ paths:
     put:
       tags: [Farms]
       operationId: updateFarm
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Atualiza fazenda
-      description: Ainda não implementado. Substitui os dados editáveis da fazenda (mesmas regras do cadastro).
+      description: |
+        Substitui os dados editáveis e os vínculos da fazenda (mesmas regras do cadastro). O novo perímetro
+        precisa continuar contendo os talhões já cadastrados, e a soma das áreas deles não pode passar da área
+        da fazenda; com talhões, o perímetro não pode ser removido (422 em `location.perimeter`).
       requestBody:
         required: true
         content:
@@ -501,8 +549,12 @@ paths:
                 $ref: "#/components/schemas/Farm"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/ValidationFailed"
         "500":
@@ -511,15 +563,21 @@ paths:
     post:
       tags: [Farms]
       operationId: importFarmPerimeter
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Importa perímetro de arquivo
       description: |
-        Ainda não implementado. Recebe um arquivo KML, KMZ, GeoJSON ou Shapefile compactado (.zip)
-        e devolve o perímetro normalizado em GeoJSON (WGS84), a área calculada em hectares e o
-        ponto de previsão (centróide). Não persiste nada: o resultado é enviado depois em `POST /farms`.
+        Recebe um arquivo KML, KMZ, GeoJSON ou Shapefile (.zip) e devolve o perímetro normalizado em GeoJSON
+        (WGS84), a área calculada em hectares, o ponto de previsão (centróide) e o município. Não persiste nada:
+        o resultado é enviado depois em `POST /farms`. Arquivo com uma única geometria vira o perímetro inteiro
+        (Polygon ou MultiPolygon); com vários polígonos, o maior é o perímetro e os demais contam em `field_count`.
+        O Shapefile (ADR 0018) vem num .zip com `.shp` e `.prj`, em coordenadas geográficas WGS 84 ou SIRGAS 2000
+        (o datum do CAR); coordenadas projetadas (UTM) ou outro datum respondem 422 com a orientação para exportar.
+        GeoJSON com `crs` diferente de WGS84 responde 422. `municipality` e `state` vêm da malha municipal do IBGE
+        (ADR 0019) e são nulos fora dela ou enquanto a malha não foi carregada. Polígono com autointerseção: 422.
       requestBody:
         required: true
         content:
@@ -541,6 +599,8 @@ paths:
                 $ref: "#/components/schemas/PerimeterImport"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "415":
@@ -555,12 +615,12 @@ paths:
     get:
       tags: [Fields]
       operationId: listFarmFields
-      x-status: planned
+      x-status: implemented
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Lista talhões da fazenda
-      description: Ainda não implementado. Todos os talhões da fazenda, com o bloco (área) de cada um.
+      description: Todos os talhões da fazenda, ordenados por bloco e nome (fazenda fora do escopo do usuário responde 404).
       responses:
         "200":
           description: Talhões da fazenda.
@@ -583,12 +643,17 @@ paths:
     post:
       tags: [Fields]
       operationId: createField
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Cadastra talhão
-      description: Ainda não implementado. A área em hectares é calculada pela API a partir do polígono.
+      description: |
+        A área em hectares é calculada pela API a partir do polígono, e o estande (`plants_per_ha`) a partir dos
+        espaçamentos. Recusa com 422 em `polygon`: fazenda sem perímetro, polígono com autointerseção, área menor
+        que `API_FIELD_MIN_AREA_HA`, parte fora do perímetro ou sobreposição com outro talhão acima da tolerância.
+        Nome repetido na fazenda: 422 em `name`. Cultura inexistente ou inativa: 422 em `crop_code`.
       requestBody:
         required: true
         content:
@@ -604,6 +669,8 @@ paths:
                 $ref: "#/components/schemas/Field"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
@@ -617,14 +684,16 @@ paths:
     put:
       tags: [Fields]
       operationId: updateField
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Atualiza talhão
       description: >-
-        Ainda não implementado. Substitui os dados editáveis do talhão (mesmo corpo do cadastro).
-        A área e o estande são recalculados pela API; condição de aplicação e última aplicação não são editáveis.
+        Substitui os dados editáveis do talhão (mesmo corpo e mesmas regras do cadastro; o polígono antigo do
+        próprio talhão não conta como sobreposição). A área e o estande são recalculados pela API; condição de
+        aplicação e última aplicação não são editáveis.
       requestBody:
         required: true
         content:
@@ -640,6 +709,559 @@ paths:
                 $ref: "#/components/schemas/Field"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/terrain:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+    get:
+      tags: [Terrain]
+      operationId: getFarmTerrain
+      x-status: implemented
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Relevo dos talhões da fazenda
+      description: |
+        Resumo da fazenda e uma linha por talhão (aba Relevo). Cada linha traz o valor efetivo: o ajuste manual,
+        se houver, ou o calculado. Talhão sem cálculo aparece com `status` = `not_calculated` e medidas nulas.
+        Enquanto houver cálculo em andamento, `progress` informa quantos terminaram; a tela consulta de novo
+        até `progress` ficar nulo.
+      responses:
+        "200":
+          description: Relevo da fazenda.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmTerrain"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/terrain/calculations:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+    post:
+      tags: [Terrain]
+      operationId: calculateFarmTerrain
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Calcula o relevo dos talhões
+      description: |
+        Agenda o cálculo a partir do modelo digital de elevação (ADR 0021) e responde sem esperar.
+        `scope` = `missing` calcula só os talhões sem relevo, pendentes ou com falha; `all` recalcula todos.
+        Ajustes manuais não são apagados. Pedido repetido durante um cálculo em andamento não duplica o trabalho
+        e devolve o estado atual: a resposta `202` é idempotente e, nesse caso, não agenda nada novo. Talhão cujo bloco do modelo de elevação não pôde ser obtido termina com
+        `status` = `failed` e o motivo em `failure_reason`; nunca com valor inventado.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TerrainCalculationRequest"
+      responses:
+        "202":
+          description: Cálculo agendado ou já em andamento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FarmTerrain"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/fields/{fieldId}/terrain:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/FieldId"
+    get:
+      tags: [Terrain]
+      operationId: getFieldTerrain
+      x-status: implemented
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Relevo detalhado do talhão
+      description: |
+        Valor efetivo, valor calculado (distribuição por classe e perfil de altitude), ajuste manual e a
+        compatibilidade de cada método de aplicação com o relevo. A compatibilidade é calculada pela API com os
+        limites de declividade configurados (ADR 0021); o front só apresenta.
+      responses:
+        "200":
+          description: Relevo do talhão.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldTerrain"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/fields/{fieldId}/terrain/adjustment:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/FieldId"
+    put:
+      tags: [Terrain]
+      operationId: adjustFieldTerrain
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Ajusta o relevo do talhão manualmente
+      description: |
+        Cria ou substitui o ajuste manual. O valor calculado continua guardado e é devolvido para comparação;
+        a classe e a compatibilidade dos métodos passam a usar o ajuste. Declividade máxima menor que a média:
+        422 em `slope_max_pct`. Justificativa vazia: 422 em `justification`. Fica registrado na auditoria.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldTerrainAdjustmentInput"
+      responses:
+        "200":
+          description: Ajuste salvo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldTerrain"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Terrain]
+      operationId: removeFieldTerrainAdjustment
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove o ajuste manual do relevo
+      description: Volta a usar o valor calculado. Talhão sem ajuste responde 404. Fica registrado na auditoria.
+      responses:
+        "200":
+          description: Ajuste removido; relevo com o valor calculado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldTerrain"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/rain-gauges:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+    get:
+      tags: [Trafficability]
+      operationId: listRainGauges
+      x-status: implemented
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Lista os pluviômetros da fazenda
+      description: Pluviômetros da fazenda, por nome (fazenda fora do escopo do usuário responde 404).
+      responses:
+        "200":
+          description: Pluviômetros da fazenda.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RainGauge"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Trafficability]
+      operationId: createRainGauge
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Cadastra pluviômetro
+      description: |
+        O pluviômetro é da fazenda; as leituras dele valem para todos os talhões ligados a ele pelo perfil de solo
+        (ADR 0022, adendo). Nome repetido na fazenda, sem diferenciar maiúsculas: 422 em `name`. Fica registrado
+        na auditoria.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RainGaugeInput"
+      responses:
+        "201":
+          description: Pluviômetro cadastrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RainGauge"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/rain-gauges/{gaugeId}:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/RainGaugeId"
+    patch:
+      tags: [Trafficability]
+      operationId: updateRainGauge
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Altera pluviômetro
+      description: |
+        Atualização parcial: chave ausente mantém o valor; `location: null` remove a localização. Pluviômetro de
+        outra fazenda ou empresa responde 404. Edição concorrente responde 409. Fica registrado na auditoria.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RainGaugePatch"
+      responses:
+        "200":
+          description: Pluviômetro alterado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RainGauge"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/rain-gauges/{gaugeId}/readings:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/RainGaugeId"
+    get:
+      tags: [Trafficability]
+      operationId: listRainReadings
+      x-status: implemented
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Lista as leituras do pluviômetro
+      description: |
+        Leituras com `observed_at` no intervalo `(from, to]`, da mais recente para a mais antiga. Sem parâmetros,
+        os últimos 7 dias até agora. O intervalo tem no máximo 31 dias; `from` posterior a `to` ou intervalo
+        maior responde 422 em `from`.
+      parameters:
+        - name: from
+          in: query
+          required: false
+          description: Início do intervalo (exclusivo), RFC 3339. Padrão, 7 dias antes de `to`.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: Fim do intervalo (inclusivo), RFC 3339. Padrão, agora.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Leituras do pluviômetro.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/RainReading"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Trafficability]
+      operationId: recordRainReading
+      x-status: implemented
+      x-permission: field_conditions.record
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Lança leitura do pluviômetro
+      description: |
+        Chuva acumulada desde a leitura anterior (`rain_mm`, de 0 a 500) lida em `observed_at` (não pode estar no
+        futuro). Vale para todos os talhões ligados ao pluviômetro. Já existe leitura do pluviômetro no mesmo
+        instante: 422 em `observed_at`. Fica registrado na auditoria.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RainReadingInput"
+      responses:
+        "201":
+          description: Leitura lançada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RainReading"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/fields/{fieldId}/soil-inspections:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/FieldId"
+    post:
+      tags: [Trafficability]
+      operationId: recordSoilInspection
+      x-status: implemented
+      x-permission: field_conditions.record
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Registra vistoria do solo do talhão
+      description: |
+        Avaliação de uma pessoa no campo. Enquanto válida (`API_SOIL_INSPECTION_VALIDITY`, padrão 12 h a partir de
+        `inspected_at`), substitui o cálculo do estado de hoje. `state` deve ser um estado conhecido (`unknown`
+        responde 422); `inspected_at` ausente vale agora e não pode estar no futuro. A auditoria guarda estado e
+        horário, não a observação.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoilInspectionInput"
+      responses:
+        "201":
+          description: Vistoria registrada.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoilInspection"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/fields/{fieldId}/soil-profile:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/FieldId"
+    get:
+      tags: [Trafficability]
+      operationId: getSoilProfile
+      x-status: implemented
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Perfil de solo do talhão
+      description: Textura do solo e pluviômetro que atende o talhão; ambos nulos até alguém informar.
+      responses:
+        "200":
+          description: Perfil de solo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoilProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Trafficability]
+      operationId: updateSoilProfile
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Define o perfil de solo do talhão
+      description: |
+        Substitui textura e vínculo com o pluviômetro. As duas chaves são obrigatórias; `null` limpa. Pluviômetro de
+        outra fazenda ou empresa: 422 em `rain_gauge_id`. Fica registrado na auditoria.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SoilProfileInput"
+      responses:
+        "200":
+          description: Perfil de solo salvo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SoilProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /farms/{farmId}/fields/{fieldId}/trafficability:
+    parameters:
+      - $ref: "#/components/parameters/FarmId"
+      - $ref: "#/components/parameters/FieldId"
+    get:
+      tags: [Trafficability]
+      operationId: getFieldTrafficability
+      x-status: implemented
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Chuva, estado do solo e métodos elegíveis do talhão
+      description: |
+        Estado do solo hoje e projetado para os próximos `days` dias, com a chuva medida e prevista, e o veredito
+        de cada método de aplicação por dia (ADR 0022). O veredito cruza o relevo (ADR 0021) com o solo: vale o
+        pior dos dois, e relevo restrito com solo úmido torna inapto o método pesado. Sem nenhuma fonte de chuva,
+        ou sem textura do solo, o estado é `unknown` e os métodos terrestres ficam em atenção, nunca aptos.
+        Datas de dia (`date`) são do fuso `America/Sao_Paulo`. Falha da fonte de previsão não gera valor
+        inventado: o problema vem em `data_issues`. Usado pela tela e pela ferramenta do agente (somente leitura).
+
+        Fonte da chuva: o pluviômetro ligado ao talhão decide sozinho se tiver leitura há menos de
+        `API_SOIL_GAUGE_MAX_STALENESS` (padrão 36 h); senão vale o modelo Open-Meteo, consultado com o centroide
+        do talhão arredondado a 0,01°. Sem a previsão, com pluviômetro o estado sai da medida e `days` traz só
+        hoje (`weather_unavailable`); sem pluviômetro o estado é `unknown`. Vistoria válida substitui o cálculo
+        de hoje, inclusive em talhão sem textura (que segue com `no_soil_texture` e projeção `unknown`).
+      parameters:
+        - name: days
+          in: query
+          required: false
+          description: Dias de projeção depois de hoje.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 7
+            default: 5
+      responses:
+        "200":
+          description: Trafegabilidade do talhão.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldTrafficability"
+              examples:
+                waterloggedClay:
+                  summary: "Talhão 4, argiloso, encharcado após 24 mm em 48 h (resumido: a resposta real traz os 6 métodos por dia e uma liberação por método terrestre)"
+                  value:
+                    field_id: fld_4
+                    farm_id: farm_1
+                    as_of: "2026-11-26T07:00:00-03:00"
+                    soil:
+                      state: waterlogged
+                      basis: measured_rain
+                      texture: clay
+                      thresholds_source: heuristic
+                      rain:
+                        last_24h_mm: 6
+                        last_48h_mm: 24
+                        last_72h_mm: 55
+                        last_7d_mm: 71
+                        source: gauge
+                        source_name: Pluviômetro da sede
+                        observed_at: "2026-11-26T07:00:00-03:00"
+                      model_moisture:
+                        volumetric_m3m3: 0.41
+                        field_capacity_m3m3: 0.36
+                        field_capacity_pct: 113.9
+                      inspection: null
+                    rain_daily:
+                      - { date: "2026-11-25", rain_mm: 18, kind: measured, source: gauge }
+                      - { date: "2026-11-26", rain_mm: 6, kind: measured, source: gauge }
+                      - { date: "2026-11-27", rain_mm: 2, kind: forecast, source: model }
+                    days:
+                      - date: "2026-11-26"
+                        soil_state: waterlogged
+                        methods:
+                          - { method: drone, verdict: apt, reasons: [], area_above_limit_pct: null }
+                          - { method: airblast, verdict: unfit, reasons: [soil_waterlogged], area_above_limit_pct: 2 }
+                    releases:
+                      - { method: airblast, required_state: ideal, date: "2026-11-29" }
+                      - { method: knapsack, required_state: moist, date: "2026-11-28" }
+                    data_issues: []
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
@@ -650,12 +1272,12 @@ paths:
     get:
       tags: [Crops]
       operationId: listCrops
-      x-status: planned
+      x-status: implemented
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Catálogo de culturas
-      description: Ainda não implementado. Culturas disponíveis para o cadastro de talhões.
+      description: Culturas ativas, por nome, disponíveis para o cadastro de talhões.
       responses:
         "200":
           description: Culturas.
@@ -677,16 +1299,18 @@ paths:
     get:
       tags: [Owners]
       operationId: listOwners
-      x-status: planned
+      x-status: implemented
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Lista proprietários
-      description: Ainda não implementado. Lista paginada com os vínculos resumidos de cada proprietário.
+      description: Lista paginada (ordenada por nome) com os vínculos resumidos de cada proprietário.
       parameters:
         - name: search
           in: query
-          description: Busca por nome/razão social ou CPF/CNPJ (com ou sem máscara).
+          description: |
+            Busca por nome/razão social (sem diferenciar maiúsculas nem acentos, ADR 0017) ou pelos
+            dígitos do CPF/CNPJ (com ou sem máscara).
           schema:
             type: string
         - name: person_type
@@ -709,12 +1333,16 @@ paths:
     post:
       tags: [Owners]
       operationId: createOwner
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Cadastra proprietário
-      description: Ainda não implementado. A API valida o CPF/CNPJ (dígitos verificadores) e rejeita duplicados com 409.
+      description: |
+        A API valida o CPF/CNPJ (dígitos verificadores) e rejeita duplicado na mesma empresa com 409 `conflict`
+        (o mesmo documento pode existir em outra empresa). `birth_date` só vale para pessoa física e não pode
+        estar no futuro; `window_alerts_enabled` exige `phone`.
       requestBody:
         required: true
         content:
@@ -730,6 +1358,8 @@ paths:
                 $ref: "#/components/schemas/Owner"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
         "422":
@@ -742,12 +1372,12 @@ paths:
     get:
       tags: [Owners]
       operationId: getOwner
-      x-status: planned
+      x-status: implemented
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Detalhe do proprietário
-      description: Ainda não implementado.
+      description: Proprietário com seus vínculos (só os das fazendas visíveis ao usuário) e seus documentos.
       responses:
         "200":
           description: Proprietário.
@@ -764,12 +1394,13 @@ paths:
     put:
       tags: [Owners]
       operationId: updateOwner
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Atualiza proprietário
-      description: Ainda não implementado.
+      description: Mesmas regras do cadastro. `person_type` e `document` identificam o proprietário e não mudam (422 em `document`).
       requestBody:
         required: true
         content:
@@ -785,6 +1416,8 @@ paths:
                 $ref: "#/components/schemas/Owner"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -799,12 +1432,12 @@ paths:
     get:
       tags: [Owners]
       operationId: getOwnerLinks
-      x-status: planned
+      x-status: implemented
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Vínculos do proprietário com fazendas
-      description: Ainda não implementado.
+      description: Vínculos atuais, ordenados pelo nome da fazenda.
       responses:
         "200":
           description: Vínculos atuais.
@@ -821,14 +1454,17 @@ paths:
     put:
       tags: [Owners]
       operationId: replaceOwnerLinks
-      x-status: planned
+      x-status: implemented
+      x-permission: registry.write
       security:
         - sessionCookie: []
         - bearerAuth: []
       summary: Substitui os vínculos do proprietário
       description: |
-        Ainda não implementado. Substitui todos os vínculos do proprietário. A API rejeita com 422
-        se a participação total de alguma fazenda passar de 100%.
+        Substitui todos os vínculos do proprietário, numa transação que trava as fazendas envolvidas. A API
+        rejeita com 422 em `links[i].share_percent` se a participação total de alguma fazenda passar de 100%,
+        e em `links[i].farm_id` para fazenda inexistente, de outra empresa ou repetida. Uma fazenda pode ficar
+        abaixo de 100% (a tela da fazenda pede para completar).
       requestBody:
         required: true
         content:
@@ -850,10 +1486,136 @@ paths:
                 $ref: "#/components/schemas/OwnerFarmLinkList"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
           $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /owners/{ownerId}/documents:
+    parameters:
+      - $ref: "#/components/parameters/OwnerId"
+    post:
+      tags: [Owners]
+      operationId: uploadOwnerDocument
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Envia documento do proprietário
+      description: |
+        Guarda o arquivo no S3 (ADR 0020) e o registra. O tipo é conferido pelo conteúdo do arquivo, não pelo
+        nome: só PDF, JPEG e PNG (outro, 415). Limite de `API_OWNER_DOCUMENT_MAX_BYTES` (10 MB por padrão; acima,
+        413). Pessoa física com `id_card` ou `driver_license`, ou pessoa jurídica com `articles_of_incorporation`,
+        deixa de ter `has_pending_documents`. Armazenamento fora do ar ou não configurado: 503, e nada é registrado.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [kind, file]
+              properties:
+                kind:
+                  $ref: "#/components/schemas/OwnerDocumentKind"
+                file:
+                  type: string
+                  format: binary
+                  description: PDF, JPEG ou PNG.
+      responses:
+        "201":
+          description: Documento registrado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnerDocument"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          $ref: "#/components/responses/ValidationFailed"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/DocumentStorageUnavailable"
+  /owners/{ownerId}/documents/{documentId}/content:
+    parameters:
+      - $ref: "#/components/parameters/OwnerId"
+      - $ref: "#/components/parameters/DocumentId"
+    get:
+      tags: [Owners]
+      operationId: downloadOwnerDocument
+      x-status: implemented
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Baixa o arquivo do documento
+      description: |
+        Entrega o arquivo pela API (o navegador nunca acessa o S3), com `Content-Disposition: attachment` e o
+        nome original. Documento removido, de outro proprietário ou fora do escopo do usuário: 404.
+      responses:
+        "200":
+          description: O arquivo.
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "503":
+          $ref: "#/components/responses/DocumentStorageUnavailable"
+  /owners/{ownerId}/documents/{documentId}:
+    parameters:
+      - $ref: "#/components/parameters/OwnerId"
+      - $ref: "#/components/parameters/DocumentId"
+    delete:
+      tags: [Owners]
+      operationId: removeOwnerDocument
+      x-status: implemented
+      x-permission: registry.write
+      security:
+        - sessionCookie: []
+        - bearerAuth: []
+      summary: Remove documento do proprietário
+      description: |
+        Exclusão lógica: o documento sai da lista e a pendência do proprietário é recalculada. O arquivo fica no
+        S3, sob o versionamento e o ciclo de vida do bucket.
+      responses:
+        "204":
+          description: Documento removido.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
   # ---------------------------------------------------------------------------
@@ -1958,6 +2720,12 @@ components:
       required: true
       schema:
         type: string
+    RainGaugeId:
+      name: gaugeId
+      in: path
+      required: true
+      schema:
+        type: string
     InvitationId:
       name: invitationId
       in: path
@@ -1966,6 +2734,12 @@ components:
         type: string
     OwnerId:
       name: ownerId
+      in: path
+      required: true
+      schema:
+        type: string
+    DocumentId:
+      name: documentId
       in: path
       required: true
       schema:
@@ -2101,6 +2875,18 @@ components:
             error:
               code: identity_provider_unavailable
               message: o provedor de identidade está indisponível
+    DocumentStorageUnavailable:
+      description: |
+        O armazenamento dos documentos de proprietário (S3, ADR 0020) está fora do ar ou não foi configurado.
+        Nada fica registrado pela metade: o arquivo enviado é apagado se o registro falhar.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: document_storage_unavailable
+              message: o armazenamento de documentos está indisponível; tente mais tarde
     ProductAccessDenied:
       description: |
         A identidade é válida, mas não dá acesso ao produto (ADR 0015, D3 e D4). `user_not_provisioned`: a conta
@@ -2459,7 +3245,9 @@ components:
     FarmStatus:
       type: string
       enum: [draft, active, pending]
-      description: "draft: rascunho do assistente; active: cadastro completo; pending: cadastro com pendências (ex.: documentos de proprietário)."
+      description: |
+        draft: rascunho do assistente; active: cadastro completo; pending: cadastro completo com algum vinculado
+        sem o documento obrigatório (calculado, nunca enviado pelo cliente).
     ProductionType:
       type: string
       enum: [coffee, grains, livestock, mixed]
@@ -2700,7 +3488,7 @@ components:
           $ref: "#/components/schemas/GeoPoint"
         municipality:
           type: [string, "null"]
-          description: Município onde está o centróide, quando a API consegue identificar.
+          description: Município (malha do IBGE) que contém um ponto interno do perímetro; nulo quando desconhecido.
         state:
           type: [string, "null"]
           minLength: 2
@@ -2800,6 +3588,666 @@ components:
           exclusiveMinimum: 0
         polygon:
           $ref: "#/components/schemas/GeoJsonPolygon"
+    TerrainStatus:
+      type: string
+      description: |
+        `not_calculated`: nunca calculado. `pending`: aguardando cálculo (pedido ou polígono alterado).
+        `calculating`: em andamento. `ready`: calculado. `failed`: não foi possível calcular (ver `failure_reason`).
+      enum: [not_calculated, pending, calculating, ready, failed]
+    SlopeClass:
+      type: string
+      description: |
+        Classe de relevo da Embrapa pela declividade média: `flat` (plano), `gently_undulating` (suave ondulado),
+        `undulating` (ondulado), `strongly_undulating` (forte ondulado), `mountainous` (montanhoso). São 4 limites
+        superiores configuráveis (padrão 3, 8, 20 e 45 %): `flat` até 3 %, `gently_undulating` até 8 %, `undulating`
+        até 20 %, `strongly_undulating` até 45 % e `mountainous` acima de 45 %. A classe "escarpado" (acima de 75 %)
+        da Embrapa não existe aqui: fica absorvida por `mountainous`.
+      enum: [flat, gently_undulating, undulating, strongly_undulating, mountainous]
+    TerrainPosition:
+      type: string
+      description: Posição no relevo em relação ao entorno. `hilltop` (topo), `slope` (encosta), `lowland` (baixada).
+      enum: [hilltop, slope, lowland]
+    TerrainAspect:
+      type: string
+      description: Exposição predominante da encosta; `flat` quando a declividade não define direção.
+      enum: [north, northeast, east, southeast, south, southwest, west, northwest, flat]
+    TerrainSource:
+      type: string
+      description: Origem do valor efetivo. `calculated` (modelo de elevação) ou `manual` (ajuste).
+      enum: [calculated, manual]
+    TerrainAdjustmentOrigin:
+      type: string
+      enum: [topographic_survey, field_assessment]
+    SprayMethod:
+      type: string
+      description: |
+        Método de aplicação. `knapsack` (costal), `tractor_boom` (tratorizado de barra), `self_propelled`
+        (autopropelido), `airblast` (turbopulverizador), `aircraft` (avião), `drone` (ARP).
+      enum: [knapsack, tractor_boom, self_propelled, airblast, aircraft, drone]
+    MethodFitStatus:
+      type: string
+      description: |
+        Compatibilidade do método com o relevo do talhão. Só considera a declividade; bula, solo, porte e zona
+        tampão são avaliados pelo planejador.
+      enum: [compatible, restricted, unsuitable]
+    ElevationModel:
+      type: object
+      required: [source, resolution_m, version]
+      properties:
+        source:
+          type: string
+          examples: [Copernicus DEM GLO-30]
+        resolution_m:
+          type: number
+          examples: [30]
+        version:
+          type: string
+          examples: ["GLO-30 COG 2022-05"]
+    TerrainMeasurement:
+      type: object
+      description: Medidas do relevo. `slope_p90_pct` e `aspect` são nulos em ajuste manual.
+      required: [slope_mean_pct, slope_p90_pct, slope_max_pct, slope_class, position, aspect]
+      properties:
+        slope_mean_pct:
+          type: number
+          description: Declividade média, em %.
+        slope_p90_pct:
+          type: [number, "null"]
+          description: Declividade abaixo da qual ficam 90 % da área, em %.
+        slope_max_pct:
+          type: number
+          description: Declividade máxima, em %.
+        slope_class:
+          $ref: "#/components/schemas/SlopeClass"
+        position:
+          $ref: "#/components/schemas/TerrainPosition"
+        aspect:
+          oneOf:
+            - $ref: "#/components/schemas/TerrainAspect"
+            - type: "null"
+    SlopeClassArea:
+      type: object
+      required: [slope_class, area_ha, share_pct]
+      properties:
+        slope_class:
+          $ref: "#/components/schemas/SlopeClass"
+        area_ha:
+          type: number
+        share_pct:
+          type: number
+          description: Participação na área do talhão, em %.
+    ElevationProfilePoint:
+      type: object
+      required: [distance_m, elevation_m]
+      properties:
+        distance_m:
+          type: number
+          description: Distância a partir do ponto mais alto, ao longo da linha de maior declive.
+        elevation_m:
+          type: number
+    TerrainCalculation:
+      type: object
+      description: Resultado do cálculo a partir do modelo de elevação.
+      required: [measurement, elevation_min_m, elevation_max_m, class_areas, profile, elevation_model, calculated_at]
+      properties:
+        measurement:
+          $ref: "#/components/schemas/TerrainMeasurement"
+        elevation_min_m:
+          type: number
+        elevation_max_m:
+          type: number
+        class_areas:
+          type: array
+          description: Uma entrada por classe, na ordem de `SlopeClass`, inclusive as de área zero.
+          items:
+            $ref: "#/components/schemas/SlopeClassArea"
+        profile:
+          type: array
+          items:
+            $ref: "#/components/schemas/ElevationProfilePoint"
+        elevation_model:
+          $ref: "#/components/schemas/ElevationModel"
+        calculated_at:
+          type: string
+          format: date-time
+    TerrainAdjustment:
+      type: object
+      required: [origin, measurement, justification, adjusted_by, adjusted_at]
+      properties:
+        origin:
+          $ref: "#/components/schemas/TerrainAdjustmentOrigin"
+        measurement:
+          $ref: "#/components/schemas/TerrainMeasurement"
+        justification:
+          type: string
+        adjusted_by:
+          $ref: "#/components/schemas/PersonRef"
+        adjusted_at:
+          type: string
+          format: date-time
+    MethodFit:
+      type: object
+      description: |
+        Com o relevo calculado, a parte da área acima do limite decide o `status`. No ajuste manual não há
+        distribuição: média acima do limite é `unsuitable`, máxima acima do limite é `restricted`, senão `compatible`.
+      required: [method, slope_limit_pct, limit_source, status, area_above_limit_pct]
+      properties:
+        method:
+          $ref: "#/components/schemas/SprayMethod"
+        slope_limit_pct:
+          type: [number, "null"]
+          description: Limite de declividade do método; nulo quando o método não é limitado por declividade.
+        limit_source:
+          type: string
+          description: "`reference`: limite configurado na API. `equipment`: limite do equipamento cadastrado (futuro)."
+          enum: [reference, equipment]
+        status:
+          $ref: "#/components/schemas/MethodFitStatus"
+        area_above_limit_pct:
+          type: [number, "null"]
+          description: |
+            Parte da área acima do limite, em %. Nula sem limite ou em ajuste manual (sem distribuição); nesse caso
+            `status` vem da comparação da média e da máxima com o limite.
+    FieldTerrainSummary:
+      type: object
+      required:
+        [field_id, field_name, block, area_ha, status, failure_reason, source, measurement, elevation_min_m, elevation_max_m, has_restricted_method]
+      properties:
+        field_id:
+          type: string
+        field_name:
+          type: string
+        block:
+          type: [string, "null"]
+        area_ha:
+          type: number
+        status:
+          $ref: "#/components/schemas/TerrainStatus"
+        failure_reason:
+          type: [string, "null"]
+        source:
+          oneOf:
+            - $ref: "#/components/schemas/TerrainSource"
+            - type: "null"
+        measurement:
+          description: Valor efetivo (ajuste ou calculado); nulo sem relevo.
+          oneOf:
+            - $ref: "#/components/schemas/TerrainMeasurement"
+            - type: "null"
+        elevation_min_m:
+          type: [number, "null"]
+          description: Altitude mínima calculada (camada "Altitude" do mapa); nula sem cálculo, mesmo com ajuste manual.
+        elevation_max_m:
+          type: [number, "null"]
+        has_restricted_method:
+          type: boolean
+          description: Algum método limitado por declividade está `restricted` ou `unsuitable` neste talhão.
+    FarmTerrain:
+      type: object
+      required: [farm_id, summary, progress, items]
+      properties:
+        farm_id:
+          type: string
+        summary:
+          type: object
+          required:
+            [field_count, calculated_field_count, slope_mean_pct, restricted_field_count, elevation_min_m, elevation_max_m, calculated_at]
+          properties:
+            field_count:
+              type: integer
+            calculated_field_count:
+              type: integer
+            slope_mean_pct:
+              type: [number, "null"]
+              description: Média da declividade efetiva ponderada pela área dos talhões com relevo.
+            restricted_field_count:
+              type: integer
+            elevation_min_m:
+              type: [number, "null"]
+            elevation_max_m:
+              type: [number, "null"]
+            calculated_at:
+              type: [string, "null"]
+              format: date-time
+              description: Cálculo mais recente entre os talhões.
+        progress:
+          description: Presente enquanto houver talhão `pending` ou `calculating` de um pedido em andamento.
+          oneOf:
+            - type: object
+              required: [total, done]
+              properties:
+                total:
+                  type: integer
+                done:
+                  type: integer
+            - type: "null"
+        items:
+          type: array
+          description: Ordenados por bloco e nome, como em `listFarmFields`.
+          items:
+            $ref: "#/components/schemas/FieldTerrainSummary"
+    FieldTerrain:
+      type: object
+      required:
+        [field_id, farm_id, status, failure_reason, source, effective, calculated, adjustment, adjustment_outdated, method_fits]
+      properties:
+        field_id:
+          type: string
+        farm_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/TerrainStatus"
+        failure_reason:
+          type: [string, "null"]
+        source:
+          oneOf:
+            - $ref: "#/components/schemas/TerrainSource"
+            - type: "null"
+        effective:
+          description: O que vale para classe e métodos (ajuste, se houver; senão o calculado).
+          oneOf:
+            - $ref: "#/components/schemas/TerrainMeasurement"
+            - type: "null"
+        calculated:
+          oneOf:
+            - $ref: "#/components/schemas/TerrainCalculation"
+            - type: "null"
+        adjustment:
+          oneOf:
+            - $ref: "#/components/schemas/TerrainAdjustment"
+            - type: "null"
+        adjustment_outdated:
+          type: boolean
+          description: O cálculo mais recente diverge do ajuste acima do limite configurado; vale revisar o ajuste.
+        method_fits:
+          type: array
+          description: Vazio sem relevo efetivo.
+          items:
+            $ref: "#/components/schemas/MethodFit"
+    SoilTexture:
+      type: string
+      description: Textura do solo do talhão. `sandy` (arenoso), `medium` (médio), `clay` (argiloso).
+      enum: [sandy, medium, clay]
+    SoilState:
+      type: string
+      description: |
+        Estado do solo para o tráfego, do melhor ao pior: `dry` (seco) e `ideal` liberam todo o tráfego terrestre,
+        `moist` (úmido) só máquinas leves, `waterlogged` (encharcado) bloqueia. `unknown`: sem fonte de chuva ou
+        sem textura.
+      enum: [dry, ideal, moist, waterlogged, unknown]
+    SoilBasis:
+      type: string
+      description: |
+        O que decidiu o estado de hoje: `inspection` (vistoria válida), `measured_rain` (pluviômetro ou estação),
+        `model` (pior entre chuva e umidade do modelo) ou `none` (sem dados).
+      enum: [inspection, measured_rain, model, none]
+    RainSource:
+      type: string
+      description: "`gauge`: pluviômetro lançado na tela. `station`: estação da fazenda. `model`: célula do modelo de previsão, não o talhão."
+      enum: [gauge, station, model]
+    EligibilityVerdict:
+      type: string
+      enum: [apt, attention, unfit]
+    EligibilityReason:
+      type: string
+      description: Motivo do veredito, em código; a tela e o agente o traduzem. Números vão em campos próprios.
+      enum:
+        [slope_restricted, slope_unsuitable, terrain_unknown, soil_moist, soil_waterlogged, soil_unknown, slope_restricted_on_wet_soil]
+    TrafficabilityDataIssue:
+      type: string
+      description: |
+        Dado que faltou no cálculo: `no_rain_source` (nem pluviômetro nem modelo), `no_soil_texture` (talhão sem
+        textura), `weather_unavailable` (fonte de previsão fora do ar; projeção ausente), `terrain_not_calculated`
+        (relevo sem cálculo; métodos pesados em atenção).
+      enum: [no_rain_source, no_soil_texture, weather_unavailable, terrain_not_calculated]
+    RainAccumulation:
+      type: object
+      required: [last_24h_mm, last_48h_mm, last_72h_mm, last_7d_mm, source, source_name, observed_at]
+      properties:
+        last_24h_mm:
+          type: number
+          minimum: 0
+        last_48h_mm:
+          type: number
+          minimum: 0
+        last_72h_mm:
+          type: number
+          minimum: 0
+        last_7d_mm:
+          type: number
+          minimum: 0
+        source:
+          $ref: "#/components/schemas/RainSource"
+        source_name:
+          type: [string, "null"]
+          description: Nome do pluviômetro ou da estação; nulo para o modelo.
+        observed_at:
+          type: string
+          format: date-time
+    ModelSoilMoisture:
+      type: object
+      required: [volumetric_m3m3, field_capacity_m3m3, field_capacity_pct]
+      properties:
+        volumetric_m3m3:
+          type: number
+          description: Umidade volumétrica do modelo na camada de 0 a 27 cm. Só tendência.
+        field_capacity_m3m3:
+          type: number
+        field_capacity_pct:
+          type: number
+          description: Umidade como porcentagem da capacidade de campo.
+    SoilInspectionView:
+      type: object
+      required: [state, inspected_at, valid_until, inspected_by]
+      properties:
+        state:
+          $ref: "#/components/schemas/SoilState"
+        inspected_at:
+          type: string
+          format: date-time
+        valid_until:
+          type: string
+          format: date-time
+        inspected_by:
+          $ref: "#/components/schemas/PersonRef"
+    SoilStatus:
+      type: object
+      required: [state, basis, texture, thresholds_source, rain, model_moisture, inspection]
+      properties:
+        state:
+          $ref: "#/components/schemas/SoilState"
+        basis:
+          $ref: "#/components/schemas/SoilBasis"
+        texture:
+          oneOf:
+            - $ref: "#/components/schemas/SoilTexture"
+            - type: "null"
+        thresholds_source:
+          type: string
+          description: "`heuristic`: limites iniciais ainda não calibrados; `calibrated`: revisados pelo agrônomo."
+          enum: [heuristic, calibrated]
+        rain:
+          oneOf:
+            - $ref: "#/components/schemas/RainAccumulation"
+            - type: "null"
+        model_moisture:
+          oneOf:
+            - $ref: "#/components/schemas/ModelSoilMoisture"
+            - type: "null"
+        inspection:
+          description: Vistoria ainda válida; nula quando não há ou já venceu.
+          oneOf:
+            - $ref: "#/components/schemas/SoilInspectionView"
+            - type: "null"
+    DailyRainEntry:
+      type: object
+      required: [date, rain_mm, kind, source]
+      properties:
+        date:
+          type: string
+          format: date
+        rain_mm:
+          type: number
+          minimum: 0
+        kind:
+          type: string
+          description: |
+            `measured`: dia passado (hoje inclusive), da mesma fonte do estado (pluviômetro ou modelo; o modelo
+            é uma estimativa da célula, não a medida do talhão). `forecast`: dia da previsão do modelo.
+          enum: [measured, forecast]
+        source:
+          $ref: "#/components/schemas/RainSource"
+    MethodEligibility:
+      type: object
+      required: [method, verdict, reasons, area_above_limit_pct]
+      properties:
+        method:
+          $ref: "#/components/schemas/SprayMethod"
+        verdict:
+          $ref: "#/components/schemas/EligibilityVerdict"
+        reasons:
+          type: array
+          items:
+            $ref: "#/components/schemas/EligibilityReason"
+        area_above_limit_pct:
+          type: [number, "null"]
+          description: Parte da área acima do limite de declividade do método, quando conhecida.
+    TrafficabilityDay:
+      type: object
+      required: [date, soil_state, methods]
+      properties:
+        date:
+          type: string
+          format: date
+        soil_state:
+          $ref: "#/components/schemas/SoilState"
+        methods:
+          type: array
+          description: Um item por método de aplicação, na ordem do enum `SprayMethod`.
+          items:
+            $ref: "#/components/schemas/MethodEligibility"
+    MethodRelease:
+      type: object
+      required: [method, required_state, date]
+      properties:
+        method:
+          $ref: "#/components/schemas/SprayMethod"
+        required_state:
+          $ref: "#/components/schemas/SoilState"
+        date:
+          type: [string, "null"]
+          format: date
+          description: Primeiro dia (hoje inclusive) em que o solo atende ao método; nulo se não houver no horizonte.
+    FieldTrafficability:
+      type: object
+      required: [field_id, farm_id, as_of, soil, rain_daily, days, releases, data_issues]
+      properties:
+        field_id:
+          type: string
+        farm_id:
+          type: string
+        as_of:
+          type: string
+          format: date-time
+        soil:
+          $ref: "#/components/schemas/SoilStatus"
+        rain_daily:
+          type: array
+          description: Chuva diária dos últimos 7 dias (medida) e dos próximos `days` dias (prevista), em ordem de data.
+          items:
+            $ref: "#/components/schemas/DailyRainEntry"
+        days:
+          type: array
+          description: Hoje e os próximos `days` dias.
+          items:
+            $ref: "#/components/schemas/TrafficabilityDay"
+        releases:
+          type: array
+          description: Liberação de cada método terrestre; aéreos não dependem do solo e não aparecem.
+          items:
+            $ref: "#/components/schemas/MethodRelease"
+        data_issues:
+          type: array
+          items:
+            $ref: "#/components/schemas/TrafficabilityDataIssue"
+    RainGauge:
+      type: object
+      required: [id, farm_id, name, location, created_at, updated_at, version]
+      properties:
+        id:
+          type: string
+        farm_id:
+          type: string
+        name:
+          type: string
+        location:
+          oneOf:
+            - $ref: "#/components/schemas/GeoPoint"
+            - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        version:
+          type: integer
+    RainGaugeInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        location:
+          oneOf:
+            - $ref: "#/components/schemas/GeoPoint"
+            - type: "null"
+    RainGaugePatch:
+      type: object
+      description: Chave ausente mantém o valor; `location` nulo remove a localização.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        location:
+          oneOf:
+            - $ref: "#/components/schemas/GeoPoint"
+            - type: "null"
+    RainReading:
+      type: object
+      required: [id, rain_gauge_id, rain_mm, observed_at, recorded_by, recorded_at]
+      properties:
+        id:
+          type: string
+        rain_gauge_id:
+          type: string
+        rain_mm:
+          type: number
+          minimum: 0
+          maximum: 500
+          description: Chuva acumulada desde a leitura anterior.
+        observed_at:
+          type: string
+          format: date-time
+        recorded_by:
+          $ref: "#/components/schemas/PersonRef"
+        recorded_at:
+          type: string
+          format: date-time
+    RainReadingInput:
+      type: object
+      required: [rain_mm, observed_at]
+      properties:
+        rain_mm:
+          type: number
+          minimum: 0
+          maximum: 500
+        observed_at:
+          type: string
+          format: date-time
+          description: Instante da leitura; não pode estar no futuro.
+    SoilInspection:
+      type: object
+      required: [id, field_id, farm_id, state, inspected_at, valid_until, inspected_by, note]
+      properties:
+        id:
+          type: string
+        field_id:
+          type: string
+        farm_id:
+          type: string
+        state:
+          $ref: "#/components/schemas/SoilState"
+        inspected_at:
+          type: string
+          format: date-time
+        valid_until:
+          type: string
+          format: date-time
+          description: Até quando a vistoria substitui o cálculo (`inspected_at` + `API_SOIL_INSPECTION_VALIDITY`).
+        inspected_by:
+          $ref: "#/components/schemas/PersonRef"
+        note:
+          type: [string, "null"]
+    SoilInspectionInput:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [dry, ideal, moist, waterlogged]
+        inspected_at:
+          type: string
+          format: date-time
+          description: Padrão, agora; não pode estar no futuro.
+        note:
+          type: [string, "null"]
+          maxLength: 500
+    SoilProfile:
+      type: object
+      required: [field_id, farm_id, soil_texture, rain_gauge]
+      properties:
+        field_id:
+          type: string
+        farm_id:
+          type: string
+        soil_texture:
+          oneOf:
+            - $ref: "#/components/schemas/SoilTexture"
+            - type: "null"
+        rain_gauge:
+          description: Pluviômetro da mesma fazenda que atende o talhão; nulo sem vínculo (o talhão usa o modelo).
+          oneOf:
+            - type: object
+              required: [id, name]
+              properties:
+                id:
+                  type: string
+                name:
+                  type: string
+            - type: "null"
+    SoilProfileInput:
+      type: object
+      required: [soil_texture, rain_gauge_id]
+      properties:
+        soil_texture:
+          oneOf:
+            - $ref: "#/components/schemas/SoilTexture"
+            - type: "null"
+        rain_gauge_id:
+          type: [string, "null"]
+          description: Pluviômetro da mesma fazenda; nulo desfaz o vínculo.
+    TerrainCalculationRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum: [missing, all]
+          default: missing
+    FieldTerrainAdjustmentInput:
+      type: object
+      required: [origin, slope_mean_pct, slope_max_pct, position, justification]
+      properties:
+        origin:
+          $ref: "#/components/schemas/TerrainAdjustmentOrigin"
+        slope_mean_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+        slope_max_pct:
+          type: number
+          minimum: 0
+          maximum: 100
+          description: Não pode ser menor que `slope_mean_pct` (422).
+        position:
+          $ref: "#/components/schemas/TerrainPosition"
+        justification:
+          type: string
+          minLength: 1
+          maxLength: 1000
     PersonType:
       type: string
       enum: [individual, company]
@@ -2875,6 +4323,9 @@ components:
           description: CPF (11 dígitos) ou CNPJ (14 dígitos), apenas dígitos. O front mascara na exibição.
         has_pending_documents:
           type: boolean
+          description: |
+            Falta o documento obrigatório: com foto (`id_card` ou `driver_license`) para pessoa física, contrato
+            social (`articles_of_incorporation`) para pessoa jurídica.
         links:
           type: array
           items:
@@ -2956,11 +4407,12 @@ components:
         - applications.register
         - applications.confirm
         - planner.use
+        - field_conditions.record
       description: |
         Capacidade devolvida em `User.permissions`. O front verifica capacidades, nunca nomes de papel.
 
         **Especificação do realm (ADR 0015, D3):** este enum e a tabela abaixo são a fonte única do que o realm
-        `inceres` implementa como *client roles* do client `agentes-agro` (8 permissões e 3 papéis compostos);
+        `inceres` implementa como *client roles* do client `agentes-agro` (9 permissões e 3 papéis compostos);
         o teste de contrato `make keycloak-test` falha se divergirem. A API não mantém tabela papel → permissões:
         vale a interseção do claim do token com este enum.
         Ler cadastros (fazendas, talhões, proprietários) no próprio escopo não exige capacidade.
@@ -2975,6 +4427,7 @@ components:
         | `applications.register` (registrar aplicação) | sim | sim | sim |
         | `applications.confirm` (confirmar aplicação) | sim | sim | não |
         | `planner.use` (Planejador e agente) | sim | sim | sim |
+        | `field_conditions.record` (lançar leitura de pluviômetro e vistoria do solo) | sim | sim | sim |
 
         O operador de planejamento só enxerga as fazendas do seu `farm_scope`.
     CompanyRef:

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	httpadapter "github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/http"
+	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/perimeter"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/domain"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/platform"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/usecase"
@@ -80,11 +81,19 @@ func composed(t *testing.T) (http.Handler, *fakes.Memory) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
+	registry := fakes.NewRegistry()
 	groups := newRouteGroups(dependencies{
-		Logger: logger, Store: db, Identity: idp, Clock: clock, IDs: platform.UUIDGenerator{},
+		Logger: logger, Store: db, Registry: registry, PerimeterParser: perimeter.NewParser(),
+		Terrain: fakes.NewTerrain(registry), TerrainRules: domain.DefaultTerrainRules(), TerrainWakeup: noWakeup{},
+		Conditions: fakes.NewFieldConditions(registry), Weather: &fakes.Weather{},
+		Trafficability: usecase.TrafficabilitySettings{Location: time.UTC, GaugeMaxStaleness: 36 * time.Hour, InspectionValidity: 12 * time.Hour},
+		Documents:      fakes.NewObjectStore(),
+		Identity:       idp, Clock: clock, IDs: platform.UUIDGenerator{},
 		Settings: usecase.Settings{
 			InvitationTTL: 72 * time.Hour, TrialDuration: 14 * 24 * time.Hour,
 			LastAccessInterval: 5 * time.Minute, DefaultPageSize: 20, MaxPageSize: 100,
+			Areas:            domain.AreaRules{MinFarmAreaHa: 0.1, MinFieldAreaHa: 0.01, ToleranceM2: 10},
+			MaxDocumentBytes: 10 << 20,
 		},
 	})
 	return httpadapter.NewRouter(httpadapter.RouterDeps{
@@ -163,6 +172,18 @@ func TestCompositionServesTheAdministrationFlow(t *testing.T) {
 	}
 	if status, _ := send(handler, "", http.MethodGet, "/health/live", nil); status != http.StatusOK {
 		t.Errorf("liveness: status %d", status)
+	}
+}
+
+func validAppEnv() map[string]string {
+	key := base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))
+	return map[string]string{
+		"API_DATABASE_URL":                    "postgres://api_app:" + secretInError + "@agro-postgres:5432/api?sslmode=disable",
+		"KEYCLOAK_URL":                        "http://keycloak:8080",
+		"KEYCLOAK_ISSUER_URL":                 "http://localhost:8180",
+		"KEYCLOAK_PROVISIONER_CLIENT_SECRET":  secretInError,
+		"KEYCLOAK_AGENTES_AGRO_CLIENT_SECRET": secretInError,
+		"API_SESSION_ENC_KEY":                 key,
 	}
 }
 

@@ -16,7 +16,15 @@ import type {
 } from '../ports'
 import type { Farm, FarmInput, FarmSummary } from '~/types/farm'
 import type { Field, FieldInput } from '~/types/field'
-import type { Owner, OwnerFarmLink, OwnerFarmLinkInput, OwnerInput, OwnerSummary } from '~/types/owner'
+import type {
+  Owner,
+  OwnerDocument,
+  OwnerDocumentKind,
+  OwnerFarmLink,
+  OwnerFarmLinkInput,
+  OwnerInput,
+  OwnerSummary,
+} from '~/types/owner'
 import type { Permission, User } from '~/types/auth'
 import { ROLE_PERMISSIONS, canSeeFarm, farmAccess, type Viewer } from './access'
 import { createAdminMockServices } from './adminServices'
@@ -24,6 +32,10 @@ import { createApplicationHistoryMockServices, createApplicationStore } from './
 import { createPlannerMockServices, type PlannerFaults } from './plannerServices'
 import { approximateAreaHa, approximateCentroid } from './geometry'
 import { createSeed, type FarmRecord, type MockSeed, type OwnerRecord, type UserRecord } from './seed'
+import { createMockTerrainService } from './terrainMock'
+import { MOCK_TERRAIN_CALCULATED_FARM_IDS, MOCK_TERRAIN_FIELD_SEEDS } from './terrainSeed'
+import { createFieldConditionsStore, createMockRainGaugeService, createMockSoilConditionsService } from './fieldConditionsMock'
+import { createMockTrafficabilityService } from './trafficabilityMock'
 import { digitsOf, fail, failIfInvalid, normalize, paginate, roundOneDecimal } from './support'
 
 export interface MockServicesOptions {
@@ -53,10 +65,17 @@ const PERIMETER_FORMATS = {
 /** The mock is always the password flavour, so tests can call `api.auth.login` without narrowing. */
 export type MockApiServices = Omit<ApiServices, 'auth'> & { readonly auth: PasswordAuthService }
 
+/** Owner document rules of the contract (POST /owners/{ownerId}/documents). */
+const DOCUMENT_KINDS: readonly OwnerDocumentKind[] = ['id_card', 'driver_license', 'articles_of_incorporation', 'other']
+const DOCUMENT_MEDIA_TYPES: readonly string[] = ['application/pdf', 'image/jpeg', 'image/png']
+const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+
 export function createMockServices(options: MockServicesOptions): MockApiServices {
   const db = options.seed ?? createSeed()
   const now = options.now ?? (() => new Date())
   let sequence = 0
+  /** Object URLs of the files uploaded in this browser session, by document id. */
+  const documentFiles = new Map<string, string>()
 
   const nextId = (prefix: string) => `${prefix}-mock-${++sequence}`
 
@@ -509,6 +528,40 @@ export function createMockServices(options: MockServicesOptions): MockApiService
         return linksOf(ownerId)
       }, 'registry.write')
     },
+    uploadDocument(ownerId, upload) {
+      return authorized(() => {
+        const record = findOwner(ownerId)
+        if (!DOCUMENT_KINDS.includes(upload.kind)) fail('validation_failed', 'dados inválidos', [{ field: 'kind', message: 'tipo de documento desconhecido' }])
+        if (upload.file.size > MAX_DOCUMENT_BYTES) fail('payload_too_large', 'arquivo maior que 10 MB')
+        if (!DOCUMENT_MEDIA_TYPES.includes(upload.file.type)) fail('unsupported_media_type', 'formato não suportado: envie PDF, JPEG ou PNG')
+        const document: OwnerDocument = { id: nextId('doc'), kind: upload.kind, fileName: upload.fileName, uploadedAt: now() }
+        record.documents.push(document)
+        record.hasPendingDocuments = requiredDocumentMissing(record)
+        // In the browser the file can be opened again from memory; on the server there is nothing to link.
+        if (import.meta.client) documentFiles.set(document.id, URL.createObjectURL(upload.file))
+        return document
+      }, 'registry.write')
+    },
+    removeDocument(ownerId, documentId) {
+      return authorized(() => {
+        const record = findOwner(ownerId)
+        const index = record.documents.findIndex(item => item.id === documentId)
+        if (index < 0) fail('not_found', 'documento não encontrado')
+        record.documents.splice(index, 1)
+        record.hasPendingDocuments = requiredDocumentMissing(record)
+      }, 'registry.write')
+    },
+    documentUrl(_ownerId, documentId) {
+      return documentFiles.get(documentId) ?? '#'
+    },
+  }
+
+  /** Same rule as the API (domain.RequiredDocumentsMissing): photo ID for a person, articles for a company. */
+  function requiredDocumentMissing(record: OwnerRecord): boolean {
+    const accepted: readonly OwnerDocumentKind[] = record.personType === 'individual'
+      ? ['id_card', 'driver_license']
+      : ['articles_of_incorporation']
+    return !record.documents.some(item => accepted.includes(item.kind))
   }
 
   // ---- auth --------------------------------------------------------------
@@ -556,6 +609,20 @@ export function createMockServices(options: MockServicesOptions): MockApiService
   const planner = createPlannerMockServices(adminContext, applicationStore, options.plannerFaults)
   const history = createApplicationHistoryMockServices(adminContext, applicationStore, options.plannerFaults)
 
+  // One store: a reading or an inspection recorded here is what "Chuva e solo" shows (ADR 0022, phase 2).
+  const fieldConditions = createFieldConditionsStore({ now: now() })
+  const fieldConditionsOptions = {
+    fields,
+    store: fieldConditions,
+    now,
+    latencyMs: options.latencyMs,
+    can: (permission: Permission) => ROLE_PERMISSIONS[requireUserRecord().role].includes(permission),
+    actor: () => {
+      const { id, name } = requireUserRecord()
+      return { id, name }
+    },
+  }
+
   return {
     auth,
     farms,
@@ -567,5 +634,20 @@ export function createMockServices(options: MockServicesOptions): MockApiService
     applications: { ...planner.applications, ...history.applications },
     today: planner.today,
     weather: history.weather,
+    terrain: createMockTerrainService({
+      fields,
+      canWrite: () => ROLE_PERMISSIONS[requireUserRecord().role].includes('registry.write'),
+      now,
+      latencyMs: options.latencyMs,
+      overrides: MOCK_TERRAIN_FIELD_SEEDS,
+      initiallyCalculatedFarmIds: MOCK_TERRAIN_CALCULATED_FARM_IDS,
+      actor: () => {
+        const { id, name } = requireUserRecord()
+        return { id, name }
+      },
+    }),
+    trafficability: createMockTrafficabilityService({ fields, now, latencyMs: options.latencyMs, conditions: fieldConditions }),
+    rainGauges: createMockRainGaugeService(fieldConditionsOptions),
+    soilConditions: createMockSoilConditionsService(fieldConditionsOptions),
   }
 }

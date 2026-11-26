@@ -1,6 +1,6 @@
 # DER da API (`services/api`)
 
-- **Status:** aceito com o [ADR 0015](../adr/0015-identidade-de-usuarios-e-keycloak.md) (2026-11-21). Tabelas `users`, `user_identities`, `invitations` e `auth_sessions` conforme as decisões D3 a D6 do ADR. **Revisão 2026-11-22:** ajustes de soft delete, FKs e CHECKs na seção 10, já implementados nas migrações `000001` a `000010` (`services/api/migrations/`) para `companies`, `crops`, `farms`, `users`, `user_identities`, `auth_sessions`, `invitations`, `user_farm_access` e `audit_events`. As demais tabelas (`fields`, `owners`, `farm_owners`, `owner_documents`, `applications`) continuam só no desenho.
+- **Status:** aceito com o [ADR 0015](../adr/0015-identidade-de-usuarios-e-keycloak.md) (2026-11-21). Tabelas `users`, `user_identities`, `invitations` e `auth_sessions` conforme as decisões D3 a D6 do ADR. **Revisão 2026-11-22:** ajustes de soft delete, FKs e CHECKs na seção 10, já implementados nas migrações `000001` a `000010` (`services/api/migrations/`) para `companies`, `crops`, `farms`, `users`, `user_identities`, `auth_sessions`, `invitations`, `user_farm_access` e `audit_events`. **Adendo 2026-11-23:** `owners` e `farm_owners` implementados nas migrações `000013` e `000014`; `fields`, `municipalities` e `owner_documents` nas `000015` a `000018` (ver adendos da seção 10). Só `applications` continua no desenho.
 - **Banco:** `api` (PostgreSQL 17 com PostGIS, ADR 0014). Dono: `services/api`. Nenhum outro serviço acessa estas tabelas.
 - **Fase:** pré-requisito da Fase 3 (persistência). Migrações das entidades de usuários e empresas criadas e testadas em banco descartável (`make db-test`).
 
@@ -54,6 +54,11 @@ erDiagram
     CROPS ||--o{ FIELDS : "cultivada em"
     FIELDS ||--o{ APPLICATIONS : "recebe"
     USERS ||--o{ APPLICATIONS : "registra e confirma"
+    FARMS ||--o{ RAIN_GAUGES : "mede chuva com"
+    RAIN_GAUGES ||--o{ RAIN_READINGS : "lido em"
+    RAIN_GAUGES ||--o{ RAIN_GAUGE_FIELDS : "atende"
+    FIELDS ||--o| RAIN_GAUGE_FIELDS : "usa no maximo um"
+    FIELDS ||--o{ SOIL_INSPECTIONS : "vistoriado em"
 
     COMPANIES {
         uuid id PK
@@ -118,6 +123,37 @@ erDiagram
         text name
         geometry polygon "Polygon 4326"
         numeric area_ha "gerada"
+        text soil_texture "sandy, medium, clay (nula)"
+    }
+    RAIN_GAUGES {
+        uuid id PK
+        uuid company_id FK
+        uuid farm_id FK
+        text name "unico por fazenda, sem caixa"
+        geometry location "Point 4326 (nula)"
+    }
+    RAIN_GAUGE_FIELDS {
+        uuid field_id PK, FK
+        uuid farm_id FK "mesma fazenda do talhao e do pluviometro"
+        uuid rain_gauge_id FK
+    }
+    RAIN_READINGS {
+        uuid id PK
+        uuid rain_gauge_id FK
+        numeric rain_mm "0 a 500"
+        timestamptz observed_at "unico por pluviometro"
+    }
+    SOIL_INSPECTIONS {
+        uuid id PK
+        uuid field_id FK
+        text state "dry, ideal, moist, waterlogged"
+        timestamptz inspected_at
+    }
+    TRAFFICABILITY_THRESHOLDS {
+        uuid id PK
+        text soil_texture UK
+        date effective_from UK
+        text source "heuristic, calibrated"
     }
     CROPS {
         text code PK
@@ -132,7 +168,7 @@ erDiagram
     FARM_OWNERS {
         uuid farm_id PK, FK
         uuid owner_id PK, FK
-        text role PK "owner, tenant, legal_representative"
+        text role "owner, tenant, legal_representative"
         numeric share_percent
     }
     OWNER_DOCUMENTS {
@@ -274,7 +310,7 @@ Calculados na leitura: `productive_area_ha` (soma dos talhões), `field_count`, 
 
 | Coluna | Tipo | Regra |
 |---|---|---|
-| `id`, `company_id`, `farm_id` | uuid | PK; FK composta `(company_id, farm_id)` → `farms`; `UNIQUE (company_id, id)` |
+| `id`, `company_id`, `farm_id` | uuid | PK; FK composta `(company_id, farm_id)` → `farms`; `UNIQUE (company_id, id)`; índice único `(company_id, farm_id, id)` (migração `000022`, alvo das FKs que amarram a fazenda) |
 | `crop_code` | text NN | FK `crops` |
 | `name` | text NN | `UNIQUE (farm_id, name)` |
 | `block`, `variety` | text | `block` é texto livre ("Área Norte") |
@@ -283,6 +319,7 @@ Calculados na leitura: `productive_area_ha` (soma dos talhões), `field_count`, 
 | `row_spacing_m`, `plant_spacing_m` | numeric(6,3) | `> 0` |
 | `polygon` | geometry(Polygon, 4326) NN | `ST_IsValid` |
 | `area_ha` | numeric(14,4) | **coluna gerada** a partir do polígono |
+| `soil_texture` | text | `sandy`, `medium`, `clay` ou nula (ADR 0022; sem textura o estado do solo é `unknown`) |
 
 Calculados na leitura: `plants_per_ha = 10000 / (row_spacing_m × plant_spacing_m)`, `last_application_at` (máximo de `applications.starts_at` confirmadas) e `spray_condition` (planner).
 
@@ -293,16 +330,17 @@ Calculados na leitura: `plants_per_ha = 10000 / (row_spacing_m × plant_spacing_
 | `id`, `company_id` | uuid | PK; FK `companies`; `UNIQUE (company_id, id)` |
 | `person_type` | text NN | `individual`, `company` |
 | `name` | text NN | |
-| `document` | text NN | só dígitos: 11 (PF) ou 14 (PJ), conforme `person_type`; `UNIQUE (company_id, document)`. Dígito verificador é regra do `domain` |
+| `document` | text NN | só dígitos: 11 (PF) ou 14 (PJ), conforme `person_type`; único por empresa entre os não removidos (`uq_owners_company_document`, parcial `deleted_at IS NULL`). Dígito verificador é regra do `domain` |
 | `birth_date` | date | só PF |
 | `phone`, `email` | text | telefone com 10 ou 11 dígitos |
 | `window_alerts_enabled` | boolean NN | alertas de janela por WhatsApp |
+| `deleted_at`, `created_at`, `updated_at`, `version` | | soft delete (`api_app` sem `DELETE`) e concorrência otimista |
 
 Dados pessoais (LGPD): `document`, `birth_date`, `phone`, `email`. Acesso restrito ao papel `app`; nunca em log.
 
 ### `farm_owners` (vínculos)
 
-PK `(farm_id, owner_id, role)`; FKs compostas para `farms` (`CASCADE`) e `owners` (`RESTRICT`). `role`: `owner`, `tenant`, `legal_representative`. `share_percent numeric(5,2)` entre 0 e 100, e **nulo quando `role <> 'owner'`**. A soma por fazenda não passar de 100% é regra da aplicação (seção 5).
+PK `(farm_id, owner_id)`: um vínculo (um papel) por par fazenda/proprietário; FKs compostas para `farms` (`CASCADE`) e `owners` (`RESTRICT`). `role`: `owner`, `tenant`, `legal_representative`. `share_percent numeric(5,2)` maior que 0 e no máximo 100 quando `role = 'owner'`, e **nulo quando `role <> 'owner'`**. A soma por fazenda (≤ 100%; exatamente 100% em fazenda `active`) é regra da aplicação (seção 5). `api_app` mantém `DELETE`: substituir vínculos apaga e regrava.
 
 ### `owner_documents`
 
@@ -341,6 +379,69 @@ Mapeia as capacidades `applications.register` e `applications.confirm`. Alimenta
 
 Alimenta "Atividade recente" do painel e a auditoria de ações administrativas. O papel `api_app` só tem `INSERT` e `SELECT` (`REVOKE UPDATE, DELETE, TRUNCATE` na migração `000010`, verificado em teste). Particionar por mês quando o volume pedir.
 
+### Relevo do talhão (ADR 0021, migrações `000019` a `000021`)
+
+`000019` só verifica `postgis_raster` e o driver GDAL GTiff (do init). Classe de relevo e compatibilidade com o método são derivadas no domínio Go, nunca em SQL.
+
+#### `elevation_sources` (referência global, sem `company_id`)
+
+`tile_key` (text PK, ex.: `S22W047`, `CHECK` de formato), `source`, `version`, `fetched_at`, `block_count > 0`. `api_app`: `SELECT` e `INSERT`.
+
+#### `elevation_blocks` (referência global)
+
+`id` (bigint identity PK), `tile_key` (FK `elevation_sources`, `CASCADE`), `rast` (`raster` NN, ladrilho de 256x256). Índices: GiST em `st_convexhull(rast)` (recorte por polígono) e `(tile_key)`. `api_app`: `SELECT` e `INSERT`.
+
+#### `terrain_runs`
+
+`id`, `company_id`, `farm_id` (FK composta → `farms`), `scope` (`missing`, `all`), `requested_by` (FK simples → `users`, como `audit_events`), `requested_at`, `finished_at` (`>= requested_at`). `UNIQUE (company_id, id)` é o alvo de `field_terrain.run_id`. Sem `DELETE` para `api_app`.
+
+#### `field_terrain` (um por talhão)
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id`, `company_id`, `farm_id`, `field_id` | uuid | FKs compostas `(company_id, field_id)` → `fields` e `(company_id, farm_id)` → `farms`; `UNIQUE (company_id, field_id)` |
+| `status` | text NN | `pending`, `calculating`, `ready`, `failed` |
+| `failure_reason` | text | obrigatório quando `failed` |
+| `run_id` | uuid | FK composta `(company_id, run_id)` → `terrain_runs` |
+| `requested_at`, `calculated_at` | timestamptz | |
+| `slope_mean_pct`, `slope_p90_pct`, `slope_max_pct` | numeric(7,3) | `>= 0`; máxima `>=` média e `>=` p90 |
+| `elevation_min_m`, `elevation_max_m` | numeric(8,2) | máxima `>=` mínima |
+| `position` | text | `hilltop`, `slope`, `lowland` |
+| `aspect` | text | oito pontos cardeais ou `flat` |
+| `slope_histogram_ha` | numeric[] | exatamente 101 posições (faixas de 1 %, a última `>= 100 %`), sem nulos, `>= 0` |
+| `profile` | jsonb | array |
+| `elevation_source`, `elevation_version`, `elevation_resolution_m` | text, text, numeric(8,2) | proveniência; resolução `> 0` |
+
+`status = 'ready'` exige `calculated_at`, todas as medidas, histograma, perfil e proveniência. Índices: `(company_id, farm_id)` e `(company_id, run_id)` parcial. `api_app` sem `DELETE`. `farm_id` repete a fazenda do talhão para listar sem junção; manter os dois coerentes é da aplicação.
+
+#### `field_terrain_adjustments` (um por talhão)
+
+`id`, `company_id`, `field_id` (FK composta → `fields`, `UNIQUE (company_id, field_id)`), `origin` (`topographic_survey`, `field_assessment`), `slope_mean_pct` e `slope_max_pct` (numeric(5,2), 0 a 100, máxima `>=` média), `position`, `justification` (não vazia, até 1000 caracteres), `adjusted_by` (FK simples → `users`), `adjusted_at`, `version`. `api_app` mantém `DELETE`: remover o ajuste volta ao valor calculado.
+
+### Chuva, solo e trafegabilidade (ADR 0022, migrações `000022` e `000023`)
+
+O estado do solo e o veredito por método nunca são gravados: o domínio da API os calcula a cada leitura com os dados abaixo, o relevo e o modelo Open-Meteo.
+
+#### `rain_gauges` (pluviômetro da fazenda)
+
+`id`, `company_id`, `farm_id` (FK composta → `farms`), `name` (não vazio, até 100 caracteres; único por fazenda sem diferenciar maiúsculas entre os não removidos: `uq_rain_gauges_farm_name`), `location` (`geometry(Point, 4326)`, opcional, `ST_IsValid`), `deleted_at`, `created_at`, `updated_at`, `version`. `UNIQUE (company_id, id)` é alvo de `rain_readings`; `UNIQUE (company_id, farm_id, id)` é alvo de `rain_gauge_fields`. `api_app` sem `DELETE` (soft delete).
+
+#### `rain_gauge_fields` (vínculo talhão → pluviômetro)
+
+PK em `field_id` (no máximo um pluviômetro por talhão). FKs compostas `(company_id, farm_id, field_id)` → `fields (company_id, farm_id, id)` e `(company_id, farm_id, rain_gauge_id)` → `rain_gauges (company_id, farm_id, id)`: como o `farm_id` é o mesmo nas duas, o banco recusa ligar o talhão a pluviômetro de outra fazenda ou empresa. `linked_at`. Substituir o vínculo apaga e regrava (`api_app` mantém `DELETE`).
+
+#### `rain_readings` (leitura do pluviômetro)
+
+`id`, `company_id`, `rain_gauge_id` (FK composta → `rain_gauges`), `rain_mm` (`numeric(6,2)`, 0 a 500: chuva acumulada desde a leitura anterior), `observed_at`, `recorded_by` (FK simples → `users`, como `terrain_runs.requested_by`), `recorded_at`. `UNIQUE (company_id, rain_gauge_id, observed_at)`, que também atende as somas por janela. "Não está no futuro" é regra do domínio. `api_app` sem `UPDATE`, `DELETE` e `TRUNCATE`.
+
+#### `soil_inspections` (vistoria do solo)
+
+`id`, `company_id`, `farm_id`, `field_id` (FK composta → `fields (company_id, farm_id, id)`), `state` (`dry`, `ideal`, `moist`, `waterlogged`; `unknown` não é vistoria), `inspected_at`, `inspected_by` (FK simples → `users`), `note` (opcional, não vazia, até 500 caracteres), `recorded_at`. A validade (12 h) é configuração da API, não do banco. `api_app` sem `UPDATE`, `DELETE` e `TRUNCATE`.
+
+#### `trafficability_thresholds` (referência global, sem `company_id`, como `crops`)
+
+Uma linha por `soil_texture` e `effective_from` (`UNIQUE`); vale a mais recente com vigência até o dia local. Limites de chuva em 48 h (`rain_48h_dry_mm` < `rain_48h_ideal_mm` < `rain_48h_moist_mm`), de umidade em % da capacidade de campo (`moisture_*_pct`, crescentes), `rain_72h_factor` (`>= 1`), `drying_rate_mm_per_day` (`> 0`), `field_capacity_m3m3` (capacidade de campo de referência, `> 0` e `<= 1`; a Open-Meteo não a fornece) e `source` (`heuristic`, `calibrated`). Semeada pela migração com os valores heurísticos do ADR 0022. `api_app` só lê; calibrar é nova migração.
+
 ## 5. Onde cada regra é imposta
 
 | Regra | Onde | Observação |
@@ -357,6 +458,8 @@ Alimenta "Atividade recente" do painel e a auditoria de ações administrativas.
 | Permissões de cada papel | **Keycloak** (client `agentes-agro`: papéis compostos) | A API só lê o claim e ignora nomes desconhecidos. Teste de contrato compara o realm com a tabela `Permission` do `openapi.yaml` |
 | Papel do usuário (fonte) | Keycloak (client `agentes-agro`) | Exatamente um papel do produto por usuário, senão `403` |
 | Condição de pulverização, janelas, alertas | `spray-planner` | |
+| Talhão e pluviômetro do vínculo na mesma fazenda | **Banco** (FKs compostas com `farm_id`) e aplicação | |
+| Estado do solo, projeção, veredito por método, validade da vistoria, idade máxima do pluviômetro | `domain` da API (limites em `trafficability_thresholds`, janelas em configuração) | Nada em trigger, view ou função SQL |
 
 ## 6. Índices (além de PK e únicos)
 
@@ -367,18 +470,27 @@ Alimenta "Atividade recente" do painel e a auditoria de ações administrativas.
 | `auth_sessions` | `(user_id)` parcial `revoked_at IS NULL`; `(issuer, idp_session_id)` parcial; `(expires_at)` | sessões ativas do usuário, *back-channel logout*, limpeza |
 | `farms` | `(company_id, status)` parcial `deleted_at IS NULL` | lista de fazendas |
 | `fields` | `(company_id, farm_id)`; `(crop_code)`; GiST em `polygon` | talhões da fazenda, filtro por cultura, consulta espacial |
+| `owners` | `(company_id, name)` parcial `deleted_at IS NULL` | lista de proprietários |
 | `farm_owners` | `(company_id, owner_id)` | vínculos do proprietário |
 | `user_farm_access` | `(company_id, farm_id)` | quem enxerga a fazenda |
 | `owner_documents` | `(company_id, owner_id)` | |
 | `applications` | `(company_id, field_id, starts_at DESC)`; `(company_id, status, starts_at DESC)` | última aplicação do talhão, painel |
 | `audit_events` | `(company_id, occurred_at DESC)` | atividade recente |
+| `elevation_blocks` | GiST em `st_convexhull(rast)`; `(tile_key)` | recorte por polígono; lado filho da FK |
+| `terrain_runs` | `(company_id, farm_id, requested_at DESC)`; `(requested_by)` | execuções da fazenda; lado filho da FK |
+| `field_terrain` | `(company_id, farm_id)`; `(company_id, run_id)` parcial | relevo da fazenda; andamento da execução |
+| `field_terrain_adjustments` | `(adjusted_by)` (o `UNIQUE (company_id, field_id)` cobre o tenant) | lado filho da FK |
+| `rain_gauges` | `(company_id, farm_id, lower(name))` único parcial; `UNIQUE (company_id, farm_id, id)` | nome único; pluviômetros da fazenda |
+| `rain_gauge_fields` | `(company_id, farm_id, rain_gauge_id)` | talhões de um pluviômetro; lado filho da FK |
+| `rain_readings` | `UNIQUE (company_id, rain_gauge_id, observed_at)`; `(recorded_by)` | leituras de um intervalo; lado filho da FK |
+| `soil_inspections` | `(company_id, field_id, inspected_at DESC)`; `(company_id, farm_id, field_id)`; `(inspected_by)` | vistoria mais recente; lados filhos das FKs |
 
 FKs compostas já têm índice na chave pai (`UNIQUE (company_id, id)`); o lado filho recebe índice conforme a tabela acima. Busca textual por nome (lista de fazendas e proprietários) começa com `ILIKE`; `pg_trgm` exige ADR (pendência 7).
 
 ## 7. Privilégios
 
 - `api_migrator` cria tudo; `api_app` recebe DML por `ALTER DEFAULT PRIVILEGES` (já no init). O init cria os dois papéis, o banco `api`, `CONNECT` só para o `api_app` e o PostGIS; **nada precisou mudar no init** (em volume antigo, sem PostGIS, criar a extensão à mão).
-- Cada migração retira do `api_app` o que a tabela não usa (privilégio mínimo): `DELETE` em `companies`, `users`, `farms` e `invitations` (soft delete); `INSERT`, `UPDATE` e `DELETE` em `crops` (referência); `UPDATE`, `DELETE` e `TRUNCATE` em `audit_events` (append-only). `user_identities`, `auth_sessions` e `user_farm_access` mantêm `DELETE` (vínculo e sessão são efêmeros).
+- Cada migração retira do `api_app` o que a tabela não usa (privilégio mínimo): `DELETE` em `companies`, `users`, `farms`, `owners` e `invitations` (soft delete); `INSERT`, `UPDATE` e `DELETE` em `crops` (referência); `UPDATE`, `DELETE` e `TRUNCATE` em `elevation_sources` e `elevation_blocks` (só inserem e leem); `DELETE` em `field_terrain` e `terrain_runs` (`field_terrain_adjustments` mantém `DELETE`); `DELETE` em `rain_gauges` (soft delete); `UPDATE`, `DELETE` e `TRUNCATE` em `rain_readings` e `soil_inspections`; `INSERT`, `UPDATE`, `DELETE` e `TRUNCATE` em `trafficability_thresholds` (referência); `rain_gauge_fields` mantém `DELETE` (vínculo substituível); `UPDATE`, `DELETE` e `TRUNCATE` em `audit_events` (append-only). `user_identities`, `auth_sessions`, `user_farm_access` e `farm_owners` mantêm `DELETE` (vínculo e sessão são efêmeros).
 - `api_app` nunca tem DDL nem `BYPASSRLS`. Não há papel de leitura ainda; criar `api_readonly` quando houver relatório.
 - Nenhum outro banco (`label_advisor`, `keycloak`) conecta aqui: `CONNECT` revogado de `PUBLIC`.
 
@@ -397,18 +509,25 @@ FKs compostas já têm índice na chave pai (`UNIQUE (company_id, id)`); o lado 
 | `GET/POST/PUT /owners...`, `/owners/{id}/links` | `owners`, `owner_documents`, `farm_owners` |
 | `GET /dashboard` | `applications`, `audit_events`, `fields` (+ janelas e alertas do planner) |
 | `POST /perimeter-imports` | nenhuma (sem estado) |
+| `GET/POST /farms/{farmId}/rain-gauges`, `PATCH .../rain-gauges/{gaugeId}` | `rain_gauges`, `audit_events` |
+| `GET/POST .../rain-gauges/{gaugeId}/readings` | `rain_readings`, `users`, `audit_events` |
+| `POST /farms/{farmId}/fields/{fieldId}/soil-inspections` | `soil_inspections`, `audit_events` |
+| `GET/PUT /farms/{farmId}/fields/{fieldId}/soil-profile` | `fields.soil_texture`, `rain_gauge_fields`, `rain_gauges`, `audit_events` |
+| `GET /farms/{farmId}/fields/{fieldId}/trafficability` | `fields`, `rain_gauge_fields`, `rain_gauges`, `rain_readings`, `soil_inspections`, `trafficability_thresholds`, `field_terrain`, `field_terrain_adjustments` (+ Open-Meteo) |
 
 `POST /auth/login` (JSON com senha) e `POST /me/password` ficam `deprecated` na Fase A do ADR 0015 (só o mock do front os usa) e saem do contrato na Fase B.
 
 ## 9. Pendências
 
 1. **Aplicação (Fase 4):** produtos, dose com unidade, equipamento e capacidade operacional. A tabela `applications` acima é o mínimo para o painel e para as permissões; os detalhes entram com o fluxo de aprovação do agente.
-2. **Armazenamento dos documentos de proprietário:** `storage_key` pressupõe armazenamento de objetos compatível com S3 (nova dependência e ADR). Até lá, o upload não pode ser implementado.
+2. ~~**Armazenamento dos documentos de proprietário**~~: resolvido pelo ADR 0020 (Amazon S3, migração `000018`).
 3. **Unicidade de `farms.code`** por empresa: não consta no contrato; confirmar antes de impor.
 4. **Usuário em mais de uma empresa:** ADR 0013 diz que hoje não. Se mudar, `users.company_id` vira tabela de vínculo (`memberships`).
 5. **`fields.block` como texto** ou como entidade própria (`field_blocks`), se blocos ganharem atributos.
 6. **Chave `uuid` v4 ou v7:** v7 melhora localidade de índice, mas o PostgreSQL 17 não o gera nativamente (precisaria gerar na aplicação).
-7. **`pg_trgm`/`unaccent`** para busca por nome: depende de ADR de extensão.
+7. **`pg_trgm`** para busca por nome com índice: o `unaccent` entrou pelo ADR 0017 (sem índice); `pg_trgm` depende de outro ADR quando o volume pedir.
+8. **Relevo do talhão (ADR 0021):** implementado nas migrações `000019` a `000021` (`postgis_raster` verificado, `elevation_sources`, `elevation_blocks`, `terrain_runs`, `field_terrain`, `field_terrain_adjustments`; dicionário na seção 4). Contrato e API HTTP implementados (5 operações da tag `Terrain`, 2026-11-24). A classe de relevo e a compatibilidade dos métodos são derivadas no domínio da API, nunca em SQL. Em aberto: o `farm_id` de `field_terrain` não é amarrado por FK ao `farm_id` do talhão; o índice `UNIQUE (company_id, farm_id, id)` em `fields` já existe (migração `000022`), e amarrar `field_terrain` a ele seria uma migração nova.
+9. **Chuva, solo e trafegabilidade (ADR 0022, fase 2):** migrações `000022` (índice único em `fields`, `CONCURRENTLY`, sozinho no arquivo) e `000023` (`fields.soil_texture`, `rain_gauges`, `rain_gauge_fields`, `rain_readings`, `soil_inspections`, `trafficability_thresholds`). Em aberto: histórico de estados calculados (`soil_state_history`, fase 4) e calibração dos limites (nova linha com `source = 'calibrated'`).
 
 ## 10. Mudanças desta revisão (2026-11-22)
 
@@ -438,3 +557,31 @@ Cada ajuste em relação ao desenho anterior, com o motivo. Verificados por `mak
 | 13 | `invitations.account_created boolean NOT NULL DEFAULT false` | Regra "só apaga a conta do realm criada por este convite e nunca usada"; `ADD COLUMN` com padrão constante não reescreve a tabela |
 | 14 | `companies.deleted_at` com `ck_companies_deleted` (excluída exige `inactive` e não operadora), criado `NOT VALID` e validado; `ix_companies_listed` parcial (`deleted_at IS NULL AND NOT is_platform_operator`) | Exclusão lógica do contrato; CNPJ segue único também para excluídas (índice único total); operadora nunca é listada nem excluída |
 | 15 | Confirmações: `version` já existia em `users` e `companies` (`>= 1`); e-mail único é parcial (ignora removidos); `UNIQUE (issuer, subject)` é total, mas o vínculo é **apagado** na remoção do usuário, então na prática não prende linhas excluídas | Concorrência otimista e reuso de e-mail/identidade |
+
+### Adendo (migrações 000013 e 000014, 2026-11-23)
+
+| # | Ajuste | Por quê |
+|---|---|---|
+| 16 | `owners` como no dicionário, com `deleted_at` e `version`; documento único por empresa em índice **parcial** (`deleted_at IS NULL`) | Segue a convenção de soft delete (seção 2): remover libera o documento; o mesmo CPF/CNPJ pode existir em outra empresa |
+| 17 | `farm_owners` com PK `(farm_id, owner_id)` em vez de `(farm_id, owner_id, role)` | O contrato, o domínio e as telas tratam um papel por par fazenda/proprietário; a PK mais estreita impõe isso no banco |
+| 18 | `share_percent > 0` para o papel `owner` (antes: entre 0 e 100) | Participação zero não é participação; `CHECK` com `IS NOT NULL` explícito, porque `CHECK` que avalia para `NULL` passa |
+| 19 | Participação trafega em centésimos de ponto percentual (inteiro) entre domínio e banco | A regra "soma exatamente 100%" sem erro de ponto flutuante |
+
+### Adendo (migrações 000015 a 000018, 2026-11-23)
+
+| # | Ajuste | Por quê |
+|---|---|---|
+| 20 | `fields` como no dicionário, mais `deleted_at`, `version` e `ck_fields_area` (`area_ha > 0`); nome único por fazenda em índice parcial | Soft delete como o resto do cadastro; todo talhão tem área própria em hectares |
+| 21 | Talhão dentro do perímetro, sem sobreposição, com área mínima e fazenda com área mínima: regras da aplicação (`domain.AreaRules`), com tolerância de desenho configurável | `EXCLUDE ... &&` compara caixas; a tolerância evita recusar bordas que o mapa desenha quase coladas |
+| 22 | Migração `000016` só verifica a extensão `unaccent` (ADR 0017) | Extensão é do init (superusuário); a migração falha com mensagem clara sem ela |
+| 23 | `municipalities` (referência global, sem `company_id`; `api_app` só lê), carregada pelo comando `cmd/load-municipalities` com o `api_migrator` (ADR 0019) | Dado de referência grande demais para uma migração |
+| 24 | `owners.documents_pending` (`DEFAULT true`, sem reescrita) e `owner_documents` com `storage_key` amarrada por `CHECK` ao prefixo do proprietário (ADR 0020) | A regra de qual documento é obrigatório fica no domínio; o banco guarda o resultado para filtrar fazendas pendentes |
+
+### Adendo (migrações 000022 e 000023, 2026-11-26)
+
+| # | Ajuste | Por quê |
+|---|---|---|
+| 25 | Índice único `(company_id, farm_id, id)` em `fields`, criado com `CONCURRENTLY` em migração própria | Alvo das FKs compostas que amarram vínculo e vistoria à fazenda do talhão sem bloquear escrita em `fields` |
+| 26 | `fields.soil_texture` nula, com `CHECK` adicionado `NOT VALID` e validado em seguida | Sem reescrita da tabela nem lock exclusivo durante a varredura |
+| 27 | `rain_gauges`, `rain_gauge_fields`, `rain_readings`, `soil_inspections` com `company_id NOT NULL` e índices que começam por `company_id` | Tenant no schema (ADR 0013) |
+| 28 | `trafficability_thresholds` global e semeada como heurística; vale a linha mais recente com vigência até hoje | Limites são configuração versionada, calibrável sem mudar código (ADR 0022, decisão 2) |

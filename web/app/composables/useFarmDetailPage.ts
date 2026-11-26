@@ -6,7 +6,9 @@ import {
   blockKey,
   COMING_SOON,
   cultivarColorSlots,
+  farmDetailTabFrom,
   farmDetailTabs,
+  farmHeaderActions,
   mapBasemapFor,
   mapColorByFor,
   toFieldMapFeatures,
@@ -19,10 +21,14 @@ import {
   toFieldPopoverView,
   toFieldRowView,
   toFieldsSummaryView,
+  toFarmOverviewView,
+  toFarmOwnerRows,
   type ConditionView,
   type DisabledAction,
   type FarmDetailTab,
   type FarmDetailTabView,
+  type FarmFactSectionView,
+  type FarmOwnerRowView,
   type FarmMapMode,
   type FieldBlockView,
   type FieldMapFeature,
@@ -30,8 +36,10 @@ import {
   type FieldsSummaryView,
   type MapLegendView,
 } from '~/utils/farmDetail'
+import { TERRAIN_SCOPE_BY_ACTION, type FarmHeaderActionId, type FarmHeaderActionView } from '~/utils/terrain'
 import { useFarm } from './useFarm'
 import { useFarmFields } from './useFarmFields'
+import { useFarmTerrainTab, type FarmTerrainTab } from './useFarmTerrainTab'
 import { usePermissions } from './usePermissions'
 
 export interface FarmDetailHeaderView {
@@ -49,9 +57,22 @@ export interface FarmDetailPage {
    */
   readonly canWrite: ComputedRef<boolean>
   readonly header: ComputedRef<FarmDetailHeaderView>
-  /** Stays on `fields`: the other tabs have no screen yet and are disabled. */
+  /** `?tab=` (replace); a disabled or unknown tab reads as `fields`. */
   readonly tab: WritableComputedRef<FarmDetailTab>
   readonly tabs: ComputedRef<readonly FarmDetailTabView[]>
+  /** "Relevo": relief per field, map layers, detail card and adjustment (screen 21). */
+  readonly terrain: FarmTerrainTab
+  /** Header buttons of the current tab, already filtered by `registry.write`. */
+  readonly headerActions: ComputedRef<readonly FarmHeaderActionView[]>
+  /**
+   * Runs the logic of a header button. "Como calculamos" (dialog), "Nova área" (not
+   * available yet) and "Novo talhão" (link) belong to the page and do nothing here.
+   */
+  readonly runHeaderAction: (id: FarmHeaderActionId) => void
+  /** "Visão geral": registry data of the farm; empty until loaded. */
+  readonly overview: ComputedRef<readonly FarmFactSectionView[]>
+  /** "Proprietários": links of the farm. */
+  readonly ownerRows: ComputedRef<readonly FarmOwnerRowView[]>
   readonly summary: ComputedRef<FieldsSummaryView>
   readonly blocks: ComputedRef<readonly FieldBlockView[]>
   readonly toggleBlock: (key: string) => void
@@ -95,7 +116,6 @@ export function useFarmDetailPage(farmId: MaybeRefOrGetter<string>, options: { n
   const farmResource = useFarm(farmId)
   const fieldsResource = useFarmFields(farmId)
 
-  const activeTab = ref<FarmDetailTab>('fields')
   const collapsedBlocks = ref<ReadonlySet<string>>(new Set())
   const mapMode = ref<FarmMapMode>('crop')
 
@@ -143,11 +163,14 @@ export function useFarmDetailPage(farmId: MaybeRefOrGetter<string>, options: { n
   })
 
   const tab = computed<FarmDetailTab>({
-    get: () => activeTab.value,
+    get: () => farmDetailTabFrom(Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab),
     set: (value) => {
-      if (isFarmDetailTabEnabled(value)) activeTab.value = value
+      if (!isFarmDetailTabEnabled(value)) return
+      void navigateTo({ query: { ...route.query, tab: value === 'fields' ? undefined : value } }, { replace: true })
     },
   })
+
+  const terrain = useFarmTerrainTab({ farmId, active: () => tab.value === 'terrain', fields: fieldsResource })
 
   const hasFieldsData = computed(() => !fieldsResource.error.value && (!fieldsResource.pending.value || fields.value.length > 0))
 
@@ -161,6 +184,15 @@ export function useFarmDetailPage(farmId: MaybeRefOrGetter<string>, options: { n
 
   const farmError = farmResource.error
   const permissions = usePermissions()
+  const canWrite = computed(() => permissions.can('registry.write'))
+  const headerActions = computed(() => farmHeaderActions(tab.value, {
+    farmId: toValue(farmId),
+    canWrite: canWrite.value,
+    terrain: tab.value === 'terrain' ? terrain.headerState.value : null,
+  }))
+  function runHeaderAction(id: FarmHeaderActionId): void {
+    if (id === 'calculateTerrain' || id === 'recalculateTerrain') void terrain.calculate(TERRAIN_SCOPE_BY_ACTION[id])
+  }
   const error = computed(() => farmError.value ?? fieldsResource.error.value)
   const pending = computed(() => farmResource.pending.value || fieldsResource.pending.value)
 
@@ -170,7 +202,13 @@ export function useFarmDetailPage(farmId: MaybeRefOrGetter<string>, options: { n
     tabs: computed(() => farmDetailTabs({
       fields: fieldsResource.pending.value && fields.value.length === 0 ? null : fields.value.length,
       owners: farm.value ? farm.value.owners.length : null,
+      terrainRestricted: terrain.restrictedFieldCount.value,
     })),
+    terrain,
+    headerActions,
+    runHeaderAction,
+    overview: computed(() => (farm.value ? toFarmOverviewView(farm.value) : [])),
+    ownerRows: computed(() => toFarmOwnerRows(farm.value?.owners ?? [])),
     summary: computed(() => toFieldsSummaryView(fieldsResource.blocks.value, hasFieldsData.value)),
     blocks,
     toggleBlock: key => setCollapsed(key, !collapsedBlocks.value.has(key)),
@@ -197,6 +235,6 @@ export function useFarmDetailPage(farmId: MaybeRefOrGetter<string>, options: { n
     refresh: async () => {
       await Promise.all([farmResource.refresh(), fieldsResource.refresh()])
     },
-    canWrite: computed(() => permissions.can('registry.write')),
+    canWrite,
   }
 }

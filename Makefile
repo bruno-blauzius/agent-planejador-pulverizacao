@@ -1,6 +1,6 @@
 PYTHON_SERVICES := services/spray-planner services/label-advisor
 
-.PHONY: hooks lint security audit up dev down build logs ps keycloak keycloak-check keycloak-test keycloak-seed keycloak-verify keycloak-audit keycloak-types migrate-up migrate-down migrate-version db-test api-test-keycloak api-test-oidc
+.PHONY: hooks lint security audit up dev down build logs ps keycloak keycloak-check keycloak-test keycloak-seed keycloak-verify keycloak-audit keycloak-types migrate-up migrate-down migrate-version api-load-municipalities db-test api-test-keycloak api-test-oidc
 
 up: ## Sobe Postgres, api, agentes e web (exige a network externa inceres-infra)
 	docker compose up -d --build
@@ -34,6 +34,9 @@ migrate-down: ## Desfaz a última migração da API no Postgres local (uma por v
 
 migrate-version: ## Versão atual das migrações da API no Postgres local
 	bash services/api/scripts/migrate.sh version
+
+api-load-municipalities: ## Baixa a malha municipal do IBGE e carrega no banco api local (papel api_migrator; ADR 0019)
+	bash services/api/scripts/load-municipalities.sh
 
 api-test-keycloak: ## Integração do adaptador Keycloak da API contra o Keycloak local (cria e apaga uma conta .test; exige make keycloak)
 	cd services/api && go test -tags integration -count=1 -v -run TestKeycloakLifecycle ./internal/adapter/keycloak

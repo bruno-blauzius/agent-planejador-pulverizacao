@@ -71,11 +71,11 @@ const tabItems = computed<readonly TabItem<FarmDetailTab>[]>(() =>
     hint: item.disabled ? TAB_UNAVAILABLE_HINT : undefined,
   })),
 )
-// The tabs only show where the screen sits; "Áreas e talhões" is the farm detail.
+// The tabs only show where the screen sits; choosing one leaves the form for that tab of the farm.
 const activeTab = computed<FarmDetailTab>({
   get: (): FarmDetailTab => 'fields',
-  set: () => {
-    void navigateTo(cancelTo.value)
+  set: (value) => {
+    void navigateTo(value === 'fields' ? cancelTo.value : { path: `/farms/${props.farmId}`, query: { tab: value } })
   },
 })
 

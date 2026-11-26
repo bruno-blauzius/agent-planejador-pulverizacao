@@ -37,9 +37,9 @@ const newFarm: FarmInput = {
 
 describe('mock session (ADR 0013)', () => {
   it.each([
-    ['bruno@agentesagro.test', 'super_admin', 'Agentes Agro', 8],
-    ['marina@fazendasantarita.test', 'admin', 'Fazenda Santa Rita', 6],
-    ['carlos.mendes@email.test', 'planning_operator', 'Fazenda Santa Rita', 2],
+    ['bruno@agentesagro.test', 'super_admin', 'Agentes Agro', 9],
+    ['marina@fazendasantarita.test', 'admin', 'Fazenda Santa Rita', 7],
+    ['carlos.mendes@email.test', 'planning_operator', 'Fazenda Santa Rita', 3],
   ])('%s signs in as %s with the capabilities of the role', async (identifier, role, companyName, permissionCount) => {
     const { api } = createWorld()
     const session = await api.auth.login({ identifier, password: TEST_PASSWORD, rememberMe: false })
@@ -58,7 +58,7 @@ describe('mock session (ADR 0013)', () => {
     const world = createWorld()
     expect(await world.as('user-carlos').auth.getCurrentUser()).toMatchObject({
       farmScope: { mode: 'selected', farmIds: ['farm-santa-rita'] },
-      permissions: ['applications.register', 'planner.use'],
+      permissions: ['applications.register', 'planner.use', 'field_conditions.record'],
     })
   })
 })

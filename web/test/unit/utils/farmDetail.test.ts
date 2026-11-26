@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import type { Farm } from '~/types/farm'
 import type { Field } from '~/types/field'
 import {
   cultivarColorSlots,
+  farmDetailTabFrom,
+  toFarmOverviewView,
+  toFarmOwnerRows,
   cultivarLabel,
   fieldShortLabel,
   formatFieldArea,
@@ -117,5 +121,71 @@ describe('farmDetail utils', () => {
   it('routes to the new field screen, encoding the block', () => {
     expect(newFieldRoute('farm 1')).toBe('/farms/farm%201/fields/new')
     expect(newFieldRoute('farm-1', 'Área Norte')).toBe('/farms/farm-1/fields/new?block=%C3%81rea%20Norte')
+  })
+})
+
+function farm(overrides: Partial<Farm> = {}): Farm {
+  return {
+    companyId: 'company-1',
+    id: 'farm-1',
+    name: 'Fazenda Santa Rita',
+    code: null,
+    city: 'Guaxupé',
+    state: 'MG',
+    status: 'pending',
+    productionType: 'coffee',
+    totalAreaHa: 486.2,
+    productiveAreaHa: 412,
+    fieldCount: 9,
+    crops: [{ code: 'coffee_arabica', name: 'Café arábica' }],
+    owners: [],
+    sprayOutlook: null,
+    forecastPoint: { lat: -21.3, lng: -46.71 },
+    perimeter: null,
+    createdAt: new Date('2026-09-01T12:00:00Z'),
+    cooperative: 'Cooxupé',
+    location: { postalCode: '37800000', carNumber: null, forecastPoint: null, perimeter: null },
+    updatedAt: new Date('2026-09-01T12:00:00Z'),
+    ...overrides,
+  }
+}
+
+describe('farm detail tabs', () => {
+  it.each([
+    ['overview', 'overview'],
+    ['owners', 'owners'],
+    ['applications', 'fields'],
+    ['windows', 'fields'],
+    ['unknown', 'fields'],
+    [undefined, 'fields'],
+  ])('reads ?tab=%s as %s', (value, expected) => {
+    expect(farmDetailTabFrom(value)).toBe(expected)
+  })
+
+  it('groups the registry data of the overview, muting what is not filled', () => {
+    const [identification, location, areas] = toFarmOverviewView(farm())
+    expect(identification?.facts).toContainEqual({ label: 'Apelido / código', value: '—', isEmpty: true })
+    expect(identification?.facts).toContainEqual({ label: 'Situação do cadastro', value: 'Com pendências', isEmpty: false })
+    expect(location?.facts).toEqual([
+      { label: 'Município / UF', value: 'Guaxupé / MG', isEmpty: false },
+      { label: 'CEP', value: '37800-000', isEmpty: false },
+      { label: 'Nº do CAR', value: '—', isEmpty: true },
+      { label: 'Sede (lat · lng)', value: '-21,30 · -46,71', isEmpty: false },
+    ])
+    expect(areas?.facts).toContainEqual({ label: 'Área total', value: '486,2 ha', isEmpty: false })
+    expect(areas?.facts).toContainEqual({ label: 'Culturas', value: 'Café arábica', isEmpty: false })
+  })
+
+  it('lists owners first, then tenants and representatives, with the share only for owners', () => {
+    const rows = toFarmOwnerRows([
+      { ownerId: 'o-3', name: 'Zé Arrendatário', role: 'tenant', sharePercent: null },
+      { ownerId: 'o-2', name: 'Marina Rezende', role: 'owner', sharePercent: 40 },
+      { ownerId: 'o-1', name: 'Helena Prado', role: 'owner', sharePercent: 60 },
+    ])
+    expect(rows.map(row => [row.name, row.roleLabel, row.shareLabel, row.to])).toEqual([
+      ['Helena Prado', 'Proprietário', '60%', '/owners?owner=o-1'],
+      ['Marina Rezende', 'Proprietário', '40%', '/owners?owner=o-2'],
+      ['Zé Arrendatário', 'Arrendatário', null, '/owners?owner=o-3'],
+    ])
   })
 })
