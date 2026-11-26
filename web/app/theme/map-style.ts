@@ -1,6 +1,8 @@
 import type { ExpressionSpecification, StyleSpecification } from 'maplibre-gl'
 import type { GeoJsonPosition, PerimeterGeometry } from '~/types/geo'
 import type { SprayCondition } from '~/types/spray'
+import type { TerrainAspect } from '~/types/terrain'
+import type { TerrainClassKey, TerrainMapLayer } from '~/utils/terrain'
 import { palette } from './palette'
 
 /**
@@ -14,7 +16,7 @@ import { palette } from './palette'
  */
 
 export type MapBasemap = 'vector' | 'satellite'
-export type MapColorBy = 'crop' | 'status'
+export type MapColorBy = 'crop' | 'status' | 'terrain'
 
 export const MAP_ATTRIBUTION = '© OpenFreeMap © OpenMapTiles © colaboradores do OpenStreetMap'
 
@@ -24,6 +26,7 @@ export const SOURCE_FEATURES = 'features'
 export const LAYER_FEATURES_FILL = 'features-fill'
 export const LAYER_FEATURES_OUTLINE = 'features-outline'
 export const LAYER_FEATURES_SELECTED = 'features-selected'
+export const LAYER_FEATURES_DASHED = 'features-dashed'
 
 /** Field fills of the Figma map, cycled per crop (legend 15:321). */
 export const MAP_FIELD_COLORS: readonly string[] = [
@@ -42,6 +45,72 @@ export const STATUS_COLORS: Readonly<Record<SprayCondition, string>> = {
   unsuitable: palette['status-unsuitable'],
   rain: palette['info-rain'],
 }
+
+/** Neutral grey of a field without relief (dashed outline on the map, "Não calculado"). */
+const TERRAIN_NOT_CALCULATED_COLOR = '#b9b7aa'
+
+/** Fill per relief class on the map and in the legend (Figma 68:1067: Embrapa classes, flat to mountainous). */
+export const TERRAIN_CLASS_COLORS: Readonly<Record<TerrainClassKey, string>> = {
+  flat: '#9fcf55',
+  gently_undulating: '#e2c84a',
+  undulating: '#e8973a',
+  strongly_undulating: '#d0573a',
+  mountainous: '#8e2f3e',
+  not_calculated: TERRAIN_NOT_CALCULATED_COLOR,
+}
+
+/**
+ * Chip of the Figma component "Relevo · Selo de classe" (67:2239) and bar of
+ * "Relevo · Linha do talhão" (67:2240): darker than the map fill so it reads on white.
+ * The Figma does not draw "Montanhoso" nor "Não calculado" in these components; those
+ * two follow the same family (darker tone of the map color, neutral for not calculated).
+ */
+export interface TerrainClassTone {
+  readonly bar: string
+  readonly badgeBackground: string
+  readonly badgeText: string
+}
+
+export const TERRAIN_CLASS_TONES: Readonly<Record<TerrainClassKey, TerrainClassTone>> = {
+  flat: { bar: '#6f9b2e', badgeBackground: '#eaf4d6', badgeText: '#335020' },
+  gently_undulating: { bar: '#c9a227', badgeBackground: '#f8f0d2', badgeText: '#6b5410' },
+  undulating: { bar: '#e08a2e', badgeBackground: '#fbe8d3', badgeText: '#7a4310' },
+  strongly_undulating: { bar: '#c8492f', badgeBackground: '#f9e0da', badgeText: '#7a2414' },
+  mountainous: { bar: '#8e2f3e', badgeBackground: '#f2dade', badgeText: '#5e1a28' },
+  not_calculated: { bar: TERRAIN_NOT_CALCULATED_COLOR, badgeBackground: palette.sand, badgeText: palette['text-secondary'] },
+}
+
+/** Sequential scale of the "Altitude" layer, index = band (0 = lowest). */
+export const TERRAIN_ELEVATION_COLORS: readonly string[] = ['#dfe6b8', '#b9cf8e', '#86b072', '#4f8a64', '#2c5f58']
+
+/** "Exposição" layer: one hue per sector, neutral for flat ground, no aspect and not calculated. */
+export const TERRAIN_ASPECT_COLORS: Readonly<Record<TerrainAspect | 'no_aspect' | 'not_calculated', string>> = {
+  north: '#4f7fd1',
+  northeast: '#4fb3c9',
+  east: '#6dbf7a',
+  southeast: '#c3d255',
+  south: '#e8b83a',
+  southwest: '#e8823a',
+  west: '#d0573a',
+  northwest: '#a768b8',
+  flat: '#cfcdc0',
+  no_aspect: '#e4e2d8',
+  not_calculated: TERRAIN_NOT_CALCULATED_COLOR,
+}
+
+/**
+ * Color per key of the layer: what MapView (`terrainPalette`) and MapLegend consume.
+ * Elevation keys are `elevation-<band>`, plus `not_calculated`.
+ */
+export function terrainPalette(layer: TerrainMapLayer): Readonly<Record<string, string>> {
+  if (layer === 'slope') return TERRAIN_CLASS_COLORS
+  if (layer === 'aspect') return TERRAIN_ASPECT_COLORS
+  const bands = TERRAIN_ELEVATION_COLORS.map((color, index) => [`elevation-${index}`, color] as const)
+  return { ...Object.fromEntries(bands), not_calculated: TERRAIN_NOT_CALCULATED_COLOR }
+}
+
+/** Fill of a terrain key that has no entry in the palette. */
+export const TERRAIN_FALLBACK_COLOR = TERRAIN_NOT_CALCULATED_COLOR
 
 interface StyleOptions {
   tilesUrl: string
@@ -96,8 +165,15 @@ export function createMapStyle({ tilesUrl, satelliteUrl, basemap }: StyleOptions
   }
 }
 
-/** Fill color per feature: by spray status (from the API) or by crop index. */
-export function featureFillColor(colorBy: MapColorBy): ExpressionSpecification {
+/**
+ * Fill color per feature: by spray status (from the API), by terrain key through the
+ * given palette (`terrainPalette(layer)`), or by crop index.
+ */
+export function featureFillColor(colorBy: MapColorBy, terrainColors: Readonly<Record<string, string>> = {}): ExpressionSpecification {
+  if (colorBy === 'terrain') {
+    // One lookup in the palette object (a `match` would need a typed, non-empty label list).
+    return ['to-color', ['coalesce', ['get', ['to-string', ['coalesce', ['get', 'terrainKey'], '']], ['literal', { ...terrainColors }]], TERRAIN_FALLBACK_COLOR]]
+  }
   if (colorBy === 'status') {
     return [
       'match',
@@ -124,6 +200,9 @@ export const FEATURE_FILL_OPACITY = 0.9
 export const FEATURE_OUTLINE_OPACITY = 0.5
 export const FEATURE_OUTLINE_WIDTH = 1.2
 export const FEATURE_SELECTED_WIDTH = 4
+/** Outline of a field without relief: dashed and a bit stronger than the plain outline so the pattern reads. */
+export const FEATURE_DASHED_WIDTH = 2
+export const FEATURE_DASHED_PATTERN: [number, number] = [2, 2]
 /** Closest zoom when fitting to geometries (avoids zooming into a single small field). */
 export const FIT_MAX_ZOOM = 17
 

@@ -357,6 +357,8 @@ Como estimar **[Heurística]**, do mais simples ao mais elaborado:
 2. **Umidade do solo do modelo**: `soil_moisture_0_to_1cm`, `1_to_3cm`, `3_to_9cm`, `9_to_27cm` (m³/m³). Vem de modelo global, não do talhão; serve como tendência.
 3. **Textura do solo** como atributo do talhão: solo argiloso retém água e demora a liberar tráfego; arenoso drena rápido.
 
+Decisão (ADR 0022): a API calcula o estado do solo (seco, ideal, úmido, encharcado ou desconhecido) com chuva medida, chuva e umidade do modelo e textura, e cruza com o relevo para dar o veredito de cada método por dia. Os limites por textura são configuração marcada como heurística até a calibração.
+
 A umidade do solo também importa para:
 - **Herbicidas pré-emergentes**, que precisam de umidade para agir.
 - **Estado da planta**: solo seco significa planta estressada e menor absorção.
@@ -380,7 +382,7 @@ Efeitos:
 - **Aumenta o escorrimento superficial.** Chuva após a aplicação em área inclinada carrega produto para cursos d'água; justifica exigir período sem chuva maior ou zona tampão maior.
 - **Concentra ar frio.** Baixadas e fundos de vale formam inversão mais cedo e mais forte.
 
-**Fonte de dados.** Declividade média e posição no relevo (topo, encosta, baixada) são **atributos estáticos do talhão**, calculados uma vez a partir de um modelo digital de elevação (a Open-Meteo tem uma API de elevação baseada em modelo de 90 m; SRTM e Copernicus DEM são alternativas).
+**Fonte de dados.** Declividade e posição no relevo (topo, encosta, baixada) são **atributos estáticos do talhão**, calculados uma vez a partir de um modelo digital de elevação. O ADR 0021 (proposto) escolhe o Copernicus DEM GLO-30, de 30 m. O modelo de 90 m da Open-Meteo é grosso demais para talhões de dezenas de hectares. Guarde a **distribuição** da declividade (média, percentil 90, máxima e área por classe), não só a média: a média esconde o trecho que passa do limite do equipamento.
 
 ---
 
@@ -495,7 +497,7 @@ Cada regra recebe o contexto de uma hora e devolve uma `Suitability` com motivo 
 | `DownwindSensitiveAreaRule` | Dano a terceiros | Direção do vento, áreas sensíveis, distância | Bloqueante |
 | `BufferZoneRule` | Infração legal | Método, UF, produto, áreas sensíveis | Bloqueante, estática por talhão |
 | `SoilTrafficabilityRule` | Compactação, atolamento | Chuva acumulada, umidade, textura | Só métodos terrestres |
-| `SlopeRule` | Segurança, deposição | Declividade, limite do equipamento | Estática por talhão e equipamento |
+| `SlopeRule` | Segurança, deposição | Compatibilidade do método com o relevo, já calculada pela API (`method_fits`, ADR 0021) | Estática por talhão e equipamento |
 | `ReapplicationIntervalRule` | Uso indevido | Histórico, intervalo do produto | Bloqueante |
 | `PreHarvestIntervalRule` | Resíduo | Data de colheita, carência | Bloqueante |
 | `ForecastConfidenceRule` | Decisão sobre dado fraco | Horizonte da previsão | Rebaixa para marginal |
@@ -629,7 +631,7 @@ Acrescente testes nos limites exatos (2, 8, 10, 12) para fixar se cada faixa é 
 3. **Fórmula do índice de risco de inversão:** quais sinais, com que pesos e limiares.
 4. **Probabilidade de chuva** a partir da qual a janela é bloqueada, e como combiná-la com o volume.
 5. **Horizonte máximo** e política de confiança.
-6. **Estimativa de trafegabilidade:** chuva acumulada, umidade do modelo ou ambos.
+6. **Estimativa de trafegabilidade:** chuva acumulada, umidade do modelo ou ambos. *Decidido no ADR 0022: chuva medida decide sozinha; sem medida, o pior entre chuva e umidade do modelo.*
 7. **Vento na altura da aplicação:** usar o de 10 m diretamente (conservador) ou corrigir.
 8. **Representação de áreas sensíveis:** pontos com raio ou polígonos; onde ficam (API ou serviço próprio).
 9. **Fonte das normas estaduais** e processo de atualização.

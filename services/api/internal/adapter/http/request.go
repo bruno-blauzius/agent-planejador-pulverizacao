@@ -29,11 +29,17 @@ const (
 // Content-Type must be application/json, the size is capped, unknown fields
 // and trailing data are rejected. Every failure is an *apiError.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	return decodeJSONWithin(w, r, dst, maxBodyBytes)
+}
+
+// decodeJSONWithin is decodeJSON with another size cap, for bodies that carry
+// geometry (a farm perimeter has thousands of vertices).
+func decodeJSONWithin(w http.ResponseWriter, r *http.Request, dst any, limit int64) error {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return &apiError{Status: http.StatusUnsupportedMediaType, Code: codeUnsupportedMediaType, Message: "envie o corpo como application/json"}
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
@@ -169,6 +175,8 @@ type response struct {
 	status int
 	body   any
 	header map[string]string
+	// raw, when set, is written as is (a downloaded file) instead of JSON.
+	raw []byte
 }
 
 // endpoint is a handler body: it receives the authenticated principal and
@@ -191,6 +199,13 @@ func serve(logger *slog.Logger, fn endpoint) http.HandlerFunc {
 		}
 		for name, value := range result.header {
 			w.Header().Set(name, value)
+		}
+		if result.raw != nil {
+			w.WriteHeader(result.status)
+			if _, err := w.Write(result.raw); err != nil {
+				logger.Warn("failed to write file response", "error", err)
+			}
+			return
 		}
 		if result.body == nil {
 			w.WriteHeader(result.status)

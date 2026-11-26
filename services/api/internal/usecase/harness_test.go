@@ -20,12 +20,14 @@ var (
 	adminPermissions = []domain.Permission{
 		domain.PermDashboardView, domain.PermUsersManage, domain.PermRegistryWrite,
 		domain.PermApplicationsRegister, domain.PermApplicationsConfirm, domain.PermPlannerUse,
+		domain.PermFieldConditionsRecord,
 	}
 	superPermissions = []domain.Permission{
 		domain.PermDashboardView, domain.PermCompaniesManage, domain.PermUsersManage, domain.PermUsersManageAll,
 		domain.PermRegistryWrite, domain.PermApplicationsRegister, domain.PermApplicationsConfirm, domain.PermPlannerUse,
+		domain.PermFieldConditionsRecord,
 	}
-	operatorPermissions = []domain.Permission{domain.PermApplicationsRegister, domain.PermPlannerUse}
+	operatorPermissions = []domain.Permission{domain.PermApplicationsRegister, domain.PermPlannerUse, domain.PermFieldConditionsRecord}
 )
 
 // env is a small world: a platform operator company with a super admin, two
@@ -56,6 +58,8 @@ func newEnv(t *testing.T) *env {
 			LastAccessInterval: 5 * time.Minute,
 			DefaultPageSize:    20,
 			MaxPageSize:        100,
+			Areas:              domain.AreaRules{MinFarmAreaHa: 0.1, MinFieldAreaHa: 0.01, ToleranceM2: 10},
+			MaxDocumentBytes:   1 << 20,
 		},
 	}
 	e.operatorCo = e.addCompany("op", "Agentes Agro", "00000000000191", true)

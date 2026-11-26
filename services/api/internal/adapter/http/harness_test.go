@@ -13,6 +13,7 @@ import (
 	"time"
 
 	httpadapter "github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/http"
+	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/perimeter"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/domain"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/usecase"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/usecase/fakes"
@@ -41,12 +42,14 @@ var (
 	adminPermissions = []domain.Permission{
 		domain.PermDashboardView, domain.PermUsersManage, domain.PermRegistryWrite,
 		domain.PermApplicationsRegister, domain.PermApplicationsConfirm, domain.PermPlannerUse,
+		domain.PermFieldConditionsRecord,
 	}
 	superPermissions = []domain.Permission{
 		domain.PermDashboardView, domain.PermCompaniesManage, domain.PermUsersManage, domain.PermUsersManageAll,
 		domain.PermRegistryWrite, domain.PermApplicationsRegister, domain.PermApplicationsConfirm, domain.PermPlannerUse,
+		domain.PermFieldConditionsRecord,
 	}
-	operatorPermissions = []domain.Permission{domain.PermApplicationsRegister, domain.PermPlannerUse}
+	operatorPermissions = []domain.Permission{domain.PermApplicationsRegister, domain.PermPlannerUse, domain.PermFieldConditionsRecord}
 )
 
 // fakeAuthenticator turns the X-Test-User header into the Principal of a user
@@ -92,8 +95,13 @@ func (a fakeAuthenticator) Authenticate(r *http.Request) (domain.Principal, erro
 // company with a super admin, client companies A and B with an admin each, and
 // an operator in A.
 type apiEnv struct {
-	t       *testing.T
-	db      *fakes.Memory
+	t   *testing.T
+	db  *fakes.Memory
+	reg *fakes.Registry
+	// municipalities answers the municipality of imported perimeters.
+	municipalities *fakes.MunicipalityRegistry
+	// objects is the object storage of owner documents.
+	objects *fakes.ObjectStore
 	idp     *fakes.Provider
 	clock   *fakes.FixedClock
 	handler http.Handler
@@ -103,8 +111,13 @@ type apiEnv struct {
 func newAPIEnv(t *testing.T) *apiEnv {
 	t.Helper()
 	e := &apiEnv{
-		t:     t,
-		db:    fakes.NewMemory(),
+		t:       t,
+		db:      fakes.NewMemory(),
+		reg:     fakes.NewRegistry(),
+		objects: fakes.NewObjectStore(),
+		municipalities: &fakes.MunicipalityRegistry{
+			Located: &domain.Municipality{Code: "3128709", Name: "Guaxupé", State: "MG"},
+		},
 		idp:   fakes.NewProvider(issuerURL),
 		clock: &fakes.FixedClock{T: time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)},
 		logs:  &bytes.Buffer{},
@@ -122,6 +135,8 @@ func newAPIEnv(t *testing.T) *apiEnv {
 	settings := usecase.Settings{
 		InvitationTTL: 72 * time.Hour, TrialDuration: 14 * 24 * time.Hour,
 		LastAccessInterval: 5 * time.Minute, DefaultPageSize: 20, MaxPageSize: 100,
+		Areas:            domain.AreaRules{MinFarmAreaHa: 0.1, MinFieldAreaHa: 0.01, ToleranceM2: 10},
+		MaxDocumentBytes: 1 << 20,
 	}
 	logger := slog.New(slog.NewTextHandler(e.logs, nil))
 	e.handler = httpadapter.NewRouter(httpadapter.RouterDeps{
@@ -143,6 +158,13 @@ func (e *apiEnv) groups(logger *slog.Logger, settings usecase.Settings) []httpad
 	ids := &sequentialUUIDs{}
 	statusDeps := usecase.UserStatusDeps{
 		Users: db, Companies: db, Identities: db, Access: idp, Lister: db, Roles: db, Tx: db, Clock: clock,
+	}
+	farmWrite := usecase.FarmWriteDeps{Farms: e.reg, Measurer: e.reg, Tx: e.reg, Clock: clock, IDs: ids, Areas: settings.Areas}
+	fieldWrite := usecase.FieldWriteDeps{
+		Farms: e.reg, Fields: e.reg, Crops: e.reg, Measurer: e.reg, Tx: e.reg, Clock: clock, IDs: ids, Areas: settings.Areas,
+	}
+	documentDeps := usecase.OwnerDocumentDeps{
+		Owners: e.reg, Documents: e.reg, Storage: e.objects, Tx: e.reg, Clock: clock, IDs: ids, Settings: settings,
 	}
 	return []httpadapter.RouteGroup{
 		httpadapter.NewUsersHandler(logger, httpadapter.UsersDeps{
@@ -174,6 +196,23 @@ func (e *apiEnv) groups(logger *slog.Logger, settings usecase.Settings) []httpad
 		}),
 		httpadapter.NewMeHandler(logger, httpadapter.MeDeps{
 			Me: usecase.NewGetMe(db, db, db), Profile: usecase.NewGetProfile(db, db), UpdateProfile: usecase.NewUpdateProfile(db, db, db),
+		}),
+		httpadapter.NewFarmsHandler(logger, httpadapter.FarmsDeps{
+			List: usecase.NewListFarms(e.reg, settings), Get: usecase.NewGetFarm(e.reg),
+			Create: usecase.NewCreateFarm(farmWrite), Update: usecase.NewUpdateFarm(farmWrite),
+			ImportPerimeter: usecase.NewImportPerimeter(perimeter.NewParser(), e.reg, e.municipalities),
+			ListFields:      usecase.NewListFields(e.reg, e.reg),
+			CreateField:     usecase.NewCreateField(fieldWrite), UpdateField: usecase.NewUpdateField(fieldWrite),
+			ListCrops: usecase.NewListCrops(e.reg),
+		}),
+		httpadapter.NewOwnerDocumentsHandler(logger, httpadapter.OwnerDocumentsDeps{
+			Upload: usecase.NewUploadOwnerDocument(documentDeps), Download: usecase.NewDownloadOwnerDocument(documentDeps),
+			Remove: usecase.NewRemoveOwnerDocument(documentDeps),
+		}, settings.MaxDocumentBytes),
+		httpadapter.NewOwnersHandler(logger, httpadapter.OwnersDeps{
+			List: usecase.NewListOwners(e.reg, settings), Get: usecase.NewGetOwner(e.reg),
+			Create: usecase.NewCreateOwner(e.reg, e.reg, clock, ids), Update: usecase.NewUpdateOwner(e.reg, e.reg, clock),
+			ReplaceLinks: usecase.NewReplaceOwnerLinks(e.reg, e.reg, clock),
 		}),
 	}
 }

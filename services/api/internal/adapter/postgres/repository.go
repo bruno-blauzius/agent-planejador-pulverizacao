@@ -100,21 +100,84 @@ func (d *Database) InTx(ctx context.Context, fn func(ctx context.Context, tx use
 	return nil
 }
 
+// InRegistryTx implements usecase.RegistryTxRunner on the same kind of
+// transaction as InTx.
+func (d *Database) InRegistryTx(ctx context.Context, fn func(ctx context.Context, tx usecase.RegistryStores) error) error {
+	err := pgx.BeginTxFunc(ctx, d.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		repo := newRepository(tx, d.opts)
+		return fn(ctx, usecase.RegistryStores{Farms: repo, Owners: repo, Ownerships: repo, Fields: repo, Documents: repo, Terrain: repo, Audit: repo})
+	})
+	if err != nil {
+		return fmt.Errorf("registry transaction: %w", err)
+	}
+	return nil
+}
+
+// InTerrainTx implements usecase.TerrainTxRunner on the same kind of transaction as InTx:
+// the terrain store and the audit recorder share it.
+func (d *Database) InTerrainTx(ctx context.Context, fn func(ctx context.Context, tx usecase.TerrainStores) error) error {
+	err := pgx.BeginTxFunc(ctx, d.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		repo := newRepository(tx, d.opts)
+		return fn(ctx, usecase.TerrainStores{Terrain: repo, Audit: repo})
+	})
+	if err != nil {
+		return fmt.Errorf("terrain transaction: %w", err)
+	}
+	return nil
+}
+
+// InFieldConditionsTx implements usecase.FieldConditionsTxRunner on the same kind of
+// transaction as InTx: the field conditions store and the audit recorder share it.
+func (d *Database) InFieldConditionsTx(ctx context.Context, fn func(ctx context.Context, tx usecase.FieldConditionsStores) error) error {
+	err := pgx.BeginTxFunc(ctx, d.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		repo := newRepository(tx, d.opts)
+		return fn(ctx, usecase.FieldConditionsStores{Conditions: repo, Audit: repo})
+	})
+	if err != nil {
+		return fmt.Errorf("field conditions transaction: %w", err)
+	}
+	return nil
+}
+
 var (
-	_ usecase.UserFinder       = (*Repository)(nil)
-	_ usecase.UserWriter       = (*Repository)(nil)
-	_ usecase.UserLister       = (*Repository)(nil)
-	_ usecase.CompanyMembers   = (*Repository)(nil)
-	_ usecase.RoleCounter      = (*Repository)(nil)
-	_ usecase.IdentityStore    = (*Repository)(nil)
-	_ usecase.InvitationFinder = (*Repository)(nil)
-	_ usecase.InvitationWriter = (*Repository)(nil)
-	_ usecase.CompanyFinder    = (*Repository)(nil)
-	_ usecase.CompanyWriter    = (*Repository)(nil)
-	_ usecase.CompanyLister    = (*Repository)(nil)
-	_ usecase.FarmDirectory    = (*Repository)(nil)
-	_ usecase.SessionRevoker   = (*Repository)(nil)
-	_ usecase.SessionStore     = (*Repository)(nil)
-	_ usecase.AuditRecorder    = (*Repository)(nil)
-	_ usecase.TxRunner         = (*Database)(nil)
+	_ usecase.UserFinder          = (*Repository)(nil)
+	_ usecase.UserWriter          = (*Repository)(nil)
+	_ usecase.UserLister          = (*Repository)(nil)
+	_ usecase.CompanyMembers      = (*Repository)(nil)
+	_ usecase.RoleCounter         = (*Repository)(nil)
+	_ usecase.IdentityStore       = (*Repository)(nil)
+	_ usecase.InvitationFinder    = (*Repository)(nil)
+	_ usecase.InvitationWriter    = (*Repository)(nil)
+	_ usecase.CompanyFinder       = (*Repository)(nil)
+	_ usecase.CompanyWriter       = (*Repository)(nil)
+	_ usecase.CompanyLister       = (*Repository)(nil)
+	_ usecase.FarmDirectory       = (*Repository)(nil)
+	_ usecase.SessionRevoker      = (*Repository)(nil)
+	_ usecase.SessionStore        = (*Repository)(nil)
+	_ usecase.AuditRecorder       = (*Repository)(nil)
+	_ usecase.TxRunner            = (*Database)(nil)
+	_ usecase.FarmReader          = (*Repository)(nil)
+	_ usecase.FarmStore           = (*Repository)(nil)
+	_ usecase.OwnerReader         = (*Repository)(nil)
+	_ usecase.OwnerStore          = (*Repository)(nil)
+	_ usecase.OwnershipStore      = (*Repository)(nil)
+	_ usecase.PerimeterMeasurer   = (*Repository)(nil)
+	_ usecase.CropReader          = (*Repository)(nil)
+	_ usecase.FieldReader         = (*Repository)(nil)
+	_ usecase.FieldStore          = (*Repository)(nil)
+	_ usecase.MunicipalityLocator = (*Repository)(nil)
+	_ usecase.OwnerDocumentStore  = (*Repository)(nil)
+	_ usecase.MunicipalityWriter  = (*Database)(nil)
+	_ usecase.RegistryTxRunner    = (*Database)(nil)
+	_ usecase.TerrainTxRunner     = (*Database)(nil)
+	_ usecase.TerrainReader       = (*Repository)(nil)
+	_ usecase.TerrainStore        = (*Repository)(nil)
+	_ usecase.TerrainStaleMarker  = (*Repository)(nil)
+	_ usecase.ElevationStore      = (*Repository)(nil)
+
+	_ usecase.RainGaugeReader                = (*Repository)(nil)
+	_ usecase.FieldConditionsReader          = (*Repository)(nil)
+	_ usecase.FieldConditionsStore           = (*Repository)(nil)
+	_ usecase.TrafficabilityThresholdsReader = (*Repository)(nil)
+	_ usecase.FieldConditionsTxRunner        = (*Database)(nil)
 )

@@ -10,9 +10,9 @@ Monorepo de estudo de agentes de IA para o agro, mantido por um arquiteto de sof
 - `services/label-advisor` — agente RAG Python que responde sobre bulas e boletins técnicos
 - `services/api` — API em Go: BFF do front, dona dos dados de talhões e aplicações
 - `web` — front-end em Nuxt + Vue
-- `infra/` — Postgres local (`infra/docker/postgres/`: `postgresql.conf` e scripts de init), a parte do produto no Keycloak (`infra/keycloak/`: clients, roles e grupos do `agentes-agro` no realm `inceres`, com o script que os aplica) e, futuramente, Terraform
+- `infra/` — Postgres local (`infra/docker/postgres/`: `postgresql.conf` e scripts de init), a parte do produto no Keycloak (`infra/keycloak/`: clients, roles e grupos do `agentes-agro` no realm `inceres`, com o script que os aplica) e Terraform (`infra/terraform/`: bucket S3 dos documentos de proprietário, ADR 0020; `apply` só manual, com credenciais do time)
 - `docs/projetos/` — o problema, as fases e a definição de pronto de cada agente
-- `docs/adr/` — decisões arquiteturais (ADRs 0007–0015 cobrem pre-commit, API Go, Docker/Postgres, contrato-primeiro no front, Vuetify, MapLibre, empresas/papéis, PostGIS+pgvector e identidade de usuários com o SSO Inceres (Keycloak))
+- `docs/adr/` — decisões arquiteturais (ADRs 0007–0022 cobrem pre-commit, API Go, Docker/Postgres, contrato-primeiro no front, Vuetify, MapLibre, empresas/papéis, PostGIS+pgvector, identidade de usuários com o SSO Inceres (Keycloak), protocolo do planejador, busca sem acento (`unaccent`), Shapefile, malha municipal do IBGE, documentos de proprietário no S3 relevo do talhão por modelo de elevação — aceito e implementado — e chuva, solo e trafegabilidade do talhão — proposto; fases 0 a 2 implementadas: domínio, contrato, front com mock e a API com pluviômetros, leituras, vistorias, perfil de solo e Open-Meteo; da fase 4, o histórico diário `soil_state_history` e os logs `weather.unavailable` e `soil_history.run`)
 - `docs/arquitetura/` — probes de Kubernetes e o DER da API (`der-api.md`)
 - **Infra compartilhada fora deste repositório:** `C:\Projetos\Inceres\infra-docker` (não é git; sobe com `./up.sh`) hospeda Kafka, RabbitMQ, Redis, o **Kong** (API gateway, `http://localhost:8100`, `http://kong:8000` na rede; rotas deste produto em `kong/kong.yml` de lá: `/agro/api`, `/agro/spray-planner` e `/agro/label-advisor`; o front não passa pelo gateway) e o **Keycloak** (SSO Inceres, realm `inceres`, `http://localhost:8180`; `http://keycloak:8080` na rede `inceres-infra`) com o banco dedicado `db-keycloak`. Este repositório não sobe Keycloak nem banco dele.
 - `docs/dominio/` — regras do domínio (ex.: condições de pulverização)
@@ -189,6 +189,7 @@ Migrações da API (golang-migrate roda em container `migrate/migrate`, sem depe
 make migrate-up        # aplica no banco api do Postgres local, com api_migrator (senha do .env)
 make migrate-down      # desfaz UMA migração (nunca -all por make)
 make migrate-version
+make api-load-municipalities   # baixa a malha municipal do IBGE e carrega no banco api local (papel api_migrator; ADR 0019)
 make db-test           # Postgres descartável: up, down, up, constraints, tenant e privilégios do api_app
 ```
 
@@ -203,7 +204,17 @@ make api-sqlc-check         # falha se o sqlcgen divergir (útil no CI)
 
 `api-test-integration` (`services/api/scripts/integration-test.sh`) sobe um container temporário com nome e porta únicos (biblioteca `scripts/lib/disposable-db.sh`, a mesma do `db-test`), aplica as migrações, roda `go test -tags integration` e remove o container ao final, mesmo em falha; nunca toca no `agro-postgres` nem no `db-keycloak`. Os testes pedem `API_TEST_DATABASE_URL` (o script define). Conexão do serviço: `API_DATABASE_URL` (papel `api_app`; a senha nunca vai para log) e `API_DB_MAX_CONNS`, `API_DB_MIN_CONNS`, `API_DB_MAX_CONN_LIFETIME`, `API_DB_MAX_CONN_IDLE_TIME`, `API_DB_HEALTH_CHECK_PERIOD`, `API_DB_CONNECT_TIMEOUT`, `API_DB_STATEMENT_TIMEOUT`, `API_SESSION_TOUCH_INTERVAL` (`platform.LoadDatabaseConfig`).
 
-> O PostGIS precisa existir no banco `api` antes da migração `000004`; em volume criado antes do ADR 0014 o init não roda, então crie como superusuário: `CREATE EXTENSION postgis;`.
+> O PostGIS precisa existir no banco `api` antes da migração `000004`, e o `unaccent` antes da `000016` (ADR 0017); em volume criado antes desses ADRs o init não roda, então crie como superusuário: `CREATE EXTENSION postgis;` e `CREATE EXTENSION unaccent;`.
+>
+> O `postgis_raster` e o driver GDAL GTiff precisam existir antes da migração `000019` (relevo do talhão, ADR 0021). Em volume antigo, como superusuário: `CREATE EXTENSION postgis_raster;` no banco `api` e `ALTER DATABASE api SET postgis.gdal_enabled_drivers = 'GTiff';` (vale para novas conexões; reinicie as do pool). Se a imagem local for anterior, reconstrua-a (`docker compose build agro-postgres`), pois o pacote `postgresql-17-postgis-3` é o que traz o raster; a `000019` falha com mensagem clara se faltar a extensão ou o driver.
+>
+> Documentos de proprietário (ADR 0020) precisam de `API_DOCUMENTS_BUCKET` e `API_DOCUMENTS_REGION` (saídas do `terraform output` em `infra/terraform/envs/dev`) e de credenciais AWS na cadeia padrão. Sem bucket, a API sobe e só as rotas de documentos respondem `503`. Limites de área e upload: `API_FARM_MIN_AREA_HA`, `API_FIELD_MIN_AREA_HA`, `API_FIELD_GEOMETRY_TOLERANCE_M2`, `API_OWNER_DOCUMENT_MAX_BYTES`.
+>
+> Relevo do talhão (ADR 0021), todas opcionais e documentadas no `.env.example`: regras `API_TERRAIN_CLASS_LIMITS_PCT`, `API_TERRAIN_FLAT_ASPECT_BELOW_PCT`, `API_TERRAIN_POSITION_RADIUS_M`, `API_TERRAIN_POSITION_TOLERANCE_M`, `API_TERRAIN_PROFILE_POINTS`, `API_TERRAIN_MIN_VALID_CELLS`, `API_TERRAIN_ADJUSTMENT_DIVERGENCE_PCT`, `API_TERRAIN_METHOD_SLOPE_LIMITS`, `API_TERRAIN_RESTRICTED_FROM_PCT`, `API_TERRAIN_UNSUITABLE_FROM_PCT`; executor `API_TERRAIN_WORKER_ENABLED`, `API_TERRAIN_WORKER_CONCURRENCY`, `API_TERRAIN_WORKER_SWEEP_INTERVAL`, `API_TERRAIN_WORKER_TILE_TIMEOUT`, `API_TERRAIN_WORKER_FIELD_TIMEOUT`, `API_TERRAIN_WORKER_LEASE_SLACK` (talhão "calculando" além de TILE + FIELD + LEASE_SLACK volta para a fila; `TILE` deve cobrir `API_ELEVATION_REQUEST_TIMEOUT` x (1 + `API_ELEVATION_RETRIES`)); fonte de elevação `API_ELEVATION_BASE_URL`, `API_ELEVATION_REQUEST_TIMEOUT`, `API_ELEVATION_MAX_BYTES`, `API_ELEVATION_RETRIES`, `API_ELEVATION_MODEL_VERSION` (`platform.LoadTerrainConfig`).
+>
+> Chuva, solo e trafegabilidade (ADR 0022, fase 2; migrações `000022`, índice único `CONCURRENTLY` em `fields`, e `000023`), todas opcionais e documentadas no `.env.example`: modelo Open-Meteo `API_WEATHER_BASE_URL`, `API_WEATHER_REQUEST_TIMEOUT` (no máximo 1m), `API_WEATHER_MAX_BYTES`, `API_WEATHER_CACHE_TTL` (cache em memória por célula de 0,01° e dia); `API_SOIL_GAUGE_MAX_STALENESS` (36h: pluviômetro sem leitura mais recente cai no modelo) e `API_SOIL_INSPECTION_VALIDITY` (12h) (`platform.LoadTrafficabilityConfig`). Os limites por textura ficam na tabela `trafficability_thresholds` (heurísticos; calibrar é nova migração). A nova capacidade `field_conditions.record` (lançar leitura e vistoria) exige `make keycloak` para chegar ao realm.
+>
+> Histórico diário do estado do solo (ADR 0022, fase 4; migração `000024`, `soil_state_history`): executor dentro da API, no padrão do executor de relevo, que grava uma vez por dia local (America/Sao_Paulo) o veredito de cada talhão de cada empresa ativa, com o mesmo núcleo do `GET .../trafficability` (`usecase.TrafficabilityEvaluator`). Variáveis opcionais: `API_SOIL_HISTORY_ENABLED` (true), `API_SOIL_HISTORY_HOUR` (7, de 0 a 23), `API_SOIL_HISTORY_CONCURRENCY` (4, de 1 a 32), `API_SOIL_HISTORY_SWEEP_INTERVAL` (5m), `API_SOIL_HISTORY_FIELD_TIMEOUT` (30s). Eventos de log estáveis: `weather.unavailable` (só a causa) e `soil_history.run` (`fields_total`, `recorded`, `already_recorded`, `no_rain_source`, `no_soil_texture`, `weather_unavailable`, `failed`, `duration_ms`); falha de um talhão sai em `soil_history.field_failed`.
 
 Banco local (o `agro-postgres` do compose, acessível só em `127.0.0.1`):
 
@@ -217,7 +228,7 @@ Front (`web`):
 ```bash
 pnpm install
 pnpm dev
-NUXT_PUBLIC_API_MOCK_PENDING=true pnpm dev   # sessão, usuários, convites, empresas e perfil na API real; o resto (planned) no mock (ADR 0010, 0015)
+NUXT_PUBLIC_API_MOCK_PENDING=true pnpm dev   # sessão, usuários, convites, empresas, perfil, fazendas, talhões, culturas, proprietários, relevo e trafegabilidade do talhão na API real; o resto (planned) no mock (ADR 0010, 0015)
 NUXT_PUBLIC_API_MOCK=true pnpm dev   # tudo em memória, com formulário de senha, para trabalhar sem a API
 pnpm test
 pnpm lint

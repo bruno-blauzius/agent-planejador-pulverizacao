@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import type { MapFeature } from '~/components/map/MapView.vue'
 import type { MapLegendItem } from '~/components/map/MapLegend.vue'
+import type { IconName } from '~/components/app/AppIcon.vue'
 import type { TabItem } from '~/components/TabsNav.vue'
 import type { FlashMessage } from '~/types/flash'
 import { FARM_MAP_MODE_LABELS, type FarmDetailTab } from '~/utils/farmDetail'
 import { fieldColor, STATUS_COLORS } from '~/theme/map-style'
+import type { FarmHeaderActionView } from '~/utils/terrain'
 
 /**
- * "Fazenda · Áreas e talhões" (Figma 15:56, content 15:126).
+ * Farm screen: "Áreas e talhões" (Figma 15:56, content 15:126), "Relevo" (Figma
+ * 67:960: TerrainTabPanel) plus "Visão geral" and "Proprietários" (no Figma
+ * frame; FarmOverviewPanel and FarmOwnersPanel). Applications and spray windows
+ * stay disabled. The header buttons depend on the tab (`headerActions`).
  * Presentation only: data, selection and map state come from useFarmDetailPage.
  */
 const route = useRoute()
@@ -17,6 +22,8 @@ const {
   header,
   tab,
   tabs,
+  overview,
+  ownerRows,
   summary,
   blocks,
   toggleBlock,
@@ -32,7 +39,9 @@ const {
   legend,
   newFieldTo,
   addFieldToBlock,
-  newArea,
+  headerActions,
+  runHeaderAction,
+  terrain,
   pending,
   error,
   isNotFound,
@@ -50,6 +59,7 @@ const toast = ref<FlashMessage | null>(null)
 const isSatelliteAvailable = Boolean(config.public.mapSatelliteUrl)
 const TAB_UNAVAILABLE_HINT = 'Em breve'
 const listPanelRef = ref<{ focusField: (id: string) => void } | null>(null)
+const isMethodologyOpen = ref(false)
 const isFirstLoad = computed(() => pending.value && !header.value.title)
 
 const tabItems = computed<readonly TabItem<FarmDetailTab>[]>(() =>
@@ -61,6 +71,17 @@ const tabItems = computed<readonly TabItem<FarmDetailTab>[]>(() =>
     hint: item.disabled ? TAB_UNAVAILABLE_HINT : undefined,
   })),
 )
+
+/** Header buttons are data (they change per tab); "Como calculamos" opens the dialog owned by this page. */
+function onHeaderAction(action: FarmHeaderActionView) {
+  runHeaderAction(action.id)
+  if (action.id === 'terrainMethodology') isMethodologyOpen.value = true
+}
+
+// `FarmHeaderActionView.icon` is a plain icon name of theme/icons.ts; BaseButton wants the typed union.
+function iconOf(action: FarmHeaderActionView): IconName | undefined {
+  return (action.icon ?? undefined) as IconName | undefined
+}
 
 /** Closes the popover and returns focus to the field row that represents it. */
 async function closePopover() {
@@ -131,11 +152,19 @@ const mapAlt = computed(() =>
         <template #badge>
           <StatusBadge v-if="header.condition" :tone="header.condition.value" :label="header.condition.label" />
         </template>
-        <template v-if="canWrite" #actions>
-          <BaseButton variant="secondary" icon="plus" :unavailable-hint="newArea.disabled ? newArea.hint : undefined">
-            Nova área
+        <template v-if="headerActions.length" #actions>
+          <BaseButton
+            v-for="action in headerActions"
+            :key="action.id"
+            :variant="action.variant"
+            :icon="iconOf(action)"
+            :to="action.to ?? undefined"
+            :unavailable-hint="action.unavailableHint ?? undefined"
+            :loading="action.loading"
+            @click="onHeaderAction(action)"
+          >
+            {{ action.label }}
           </BaseButton>
-          <BaseButton icon="plus" :to="newFieldTo">Novo talhão</BaseButton>
         </template>
       </PageHeader>
 
@@ -152,6 +181,40 @@ const mapAlt = computed(() =>
           <BaseButton variant="secondary" size="sm" icon="undo" @click="refresh()">Tentar novamente</BaseButton>
         </template>
       </ToastAlert>
+
+      <div
+        v-else-if="tab === 'overview'"
+        id="farm-detail-overview"
+        role="tabpanel"
+        aria-labelledby="farm-detail-tab-overview"
+      >
+        <FarmOverviewPanel :sections="overview" :loading="isFirstLoad" />
+      </div>
+
+      <div
+        v-else-if="tab === 'terrain'"
+        id="farm-detail-terrain"
+        role="tabpanel"
+        aria-labelledby="farm-detail-tab-terrain"
+      >
+        <TerrainTabPanel
+          :tab="terrain"
+          :perimeter="mapPerimeter"
+          :map-alt="mapAlt"
+          :fields-loading="pending && !blocks.length"
+          :empty="isEmpty"
+          :add-field="canWrite ? { label: 'Desenhe o primeiro talhão', to: newFieldTo } : null"
+        />
+      </div>
+
+      <div
+        v-else-if="tab === 'owners'"
+        id="farm-detail-owners"
+        role="tabpanel"
+        aria-labelledby="farm-detail-tab-owners"
+      >
+        <FarmOwnersPanel :owners="ownerRows" :loading="isFirstLoad" />
+      </div>
 
       <div
         v-else
@@ -201,6 +264,13 @@ const mapAlt = computed(() =>
         </MapView>
       </div>
     </template>
+
+    <TerrainHowItWorksDialog
+      v-model:open="isMethodologyOpen"
+      :title="terrain.methodology.title"
+      :paragraphs="terrain.methodology.paragraphs"
+      :attribution="terrain.methodology.attribution"
+    />
 
     <ToastAlert
       v-if="toast"

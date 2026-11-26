@@ -13,6 +13,7 @@ export type Permission =
   | 'applications.register'
   | 'applications.confirm'
   | 'planner.use'
+  | 'field_conditions.record'
 
 export interface CompanyRef {
   readonly id: string

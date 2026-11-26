@@ -48,7 +48,8 @@ create_service_database api "$API_DB_MIGRATOR_PASSWORD" "$API_DB_APP_PASSWORD"
 create_service_database label_advisor "$LABEL_ADVISOR_DB_MIGRATOR_PASSWORD" "$LABEL_ADVISOR_DB_APP_PASSWORD"
 
 # Extensões exigem superusuário, por isso são criadas aqui e não nas migrações.
-# vector (pgvector) fica no label_advisor; postgis (geometria dos talhões) na api.
+# vector (pgvector) fica no label_advisor; postgis (geometria dos talhões) e unaccent
+# (busca sem acento, ADR 0017) na api.
 # A imagem traz as duas (infra/docker/postgres/Dockerfile), mas cada banco só
 # ganha a extensão de que precisa.
 run_sql --dbname label_advisor <<'SQL'
@@ -56,7 +57,13 @@ CREATE EXTENSION IF NOT EXISTS vector;
 SQL
 run_sql --dbname api <<'SQL'
 CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS unaccent;
+-- Relevo do talhão (ADR 0021): blocos do modelo de elevação em colunas raster. O PostGIS
+-- desabilita todos os drivers GDAL por padrão; ST_FromGDALRaster/ST_AsGDALRaster precisam do
+-- GTiff. Configurado no banco (vale para todos os papéis e conexões, inclusive api_app).
+CREATE EXTENSION IF NOT EXISTS postgis_raster;
 SQL
+run_sql --dbname postgres -c "ALTER DATABASE api SET postgis.gdal_enabled_drivers = 'GTiff'"
 for database in postgres api label_advisor; do
   run_sql --dbname "$database" -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;'
 done

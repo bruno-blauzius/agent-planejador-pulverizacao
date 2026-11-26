@@ -26,6 +26,10 @@ export interface MapFeature {
   readonly status?: SprayCondition | null
   /** Color slot by crop (`colorBy="crop"`), index into the Figma field palette. */
   readonly cropIndex?: number
+  /** Color key of the layer (`colorBy="terrain"`), looked up in `terrainPalette`. */
+  readonly terrainKey?: string
+  /** Dashed outline (field without a value to paint, e.g. relief not calculated). */
+  readonly dashed?: boolean
   /** Short text of the pill drawn over the polygon (Figma 15:279, e.g. "T1"); interactive maps only. */
   readonly label?: string
   /** Drawn as an outline only (the farm perimeter behind its fields). */
@@ -82,6 +86,8 @@ const props = withDefaults(
     perimeter?: PerimeterGeometry | null
     features?: readonly MapFeature[]
     colorBy?: MapColorBy
+    /** Color per `terrainKey` (`theme/map-style.ts` `terrainPalette(layer)`), for `colorBy="terrain"`. */
+    terrainPalette?: Readonly<Record<string, string>>
     selectedId?: string | null
     basemap?: MapBasemap
     /** Defaults to true for `farm` and false for `thumbnail`. */
@@ -106,6 +112,7 @@ const props = withDefaults(
     perimeter: null,
     features: () => [],
     colorBy: 'crop',
+    terrainPalette: () => ({}),
     selectedId: null,
     basemap: 'vector',
     interactive: undefined,
@@ -296,6 +303,7 @@ onBeforeUnmount(() => popoverObserver?.disconnect())
           ref="canvasRef"
           :features="allFeatures"
           :color-by="colorBy"
+          :terrain-palette="terrainPalette"
           :selected-id="selectedId"
           :basemap="basemap"
           :interactive="isInteractive"

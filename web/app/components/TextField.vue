@@ -23,6 +23,8 @@ const props = withDefaults(
     required?: boolean
     readonly?: boolean
     maxlength?: number
+    /** Upper bound of a `date` input (`YYYY-MM-DD`). */
+    max?: string
   }>(),
   {
     placeholder: undefined,
@@ -38,6 +40,7 @@ const props = withDefaults(
     required: false,
     readonly: false,
     maxlength: undefined,
+    max: undefined,
   },
 )
 
@@ -87,6 +90,7 @@ const errorMessages = computed(() => (props.error ? [props.error] : []))
       :readonly="readonly"
       :required="required"
       :maxlength="maxlength"
+      :max="max"
       :hint="hasError ? undefined : hint"
       :persistent-hint="Boolean(hint)"
       :error-messages="errorMessages"

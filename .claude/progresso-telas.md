@@ -12,12 +12,21 @@
 - Tela 2: created_at no FarmSummary; "Janelas aptas hoje" = "—" + "Disponível com o planejador"; perímetro + forecast_point na lista; menu do cartão só "Abrir"; toast neutro "Área de N ha cadastrada."
 - Tela 3: "Part." = % em cada chip de fazenda; coluna mostra valor único/igual ou "Varia"; "Exportar" desabilitado "Em breve"; destaque só na linha recém-salva (flash com highlightId); modal da tela 4 via ?owner=new|<id>[&step=links].
 - Tela 9: cores/legenda por variedade (Figma); `PUT /farms/{id}/fields/{fieldId}` adicionado ao contrato (planned) e "Editar" → /farms/{id}/fields/{fieldId}/edit (formulário da tela 10); "Nova área", "Planejar aplicação", "Apta hoje" e demais abas desabilitados sem dado inventado.
+- Tela 9 (2026-11-23): abas "Visão geral" e "Proprietários" liberadas sem frame no Figma (`FarmOverviewPanel` no layout da revisão do assistente; `FarmOwnersPanel` com vínculos que abrem o modal do proprietário). Aba na URL (`?tab=`). "Aplicações" e "Janelas de pulverização" seguem desabilitadas.
 - Tela 9: áreas em ordem alfabética natural (API sem campo de ordem; Figma mostra Norte primeiro); not_found preservado no SSR via ApiError.data.
 - Tela 4: upload de documento desabilitado ("Envio de documentos em breve") + aviso de pendência; "Remover proprietário" oculto; "CPF/CNPJ válido" (sem consulta à Receita); papel padrão owner; documento bloqueado na edição.
 - Assistente (telas 5–8): rascunho local (useState + localStorage, limpo no logout); foto/logo e "Usar o CAR" desabilitados; prévia mostra tipo de produção no lugar de "cultura principal"; área desenhada = prévia aproximada (@turf/area, ADR 0012) na tela 6; passo 2 exige município, UF e perímetro (sede opcional).
 - Tela 10: estande (plantas/ha) "calculado ao salvar" (API); área de prévia rotulada como aproximada (ADR 0012); perímetro só avisa (checagem de vértices), sem bloquear; "+ Outra" abre o catálogo de culturas; safra null no cadastro; espaçamento opcional em campo único. Deps: terra-draw 1.40.0, terra-draw-maplibre-gl-adapter 1.5.0, @turf/area 7.4.0.
 - Tela 6: município/UF digitados (sem geocodificação; `GET /geo/reverse` fica como pendência futura); resposta de `POST /perimeter-imports` ampliada (município, datum, talhões no arquivo — opcionais); limite de arquivo 20 MB (Figma); aviso (não bloqueia) se a sede cair fora do perímetro; "Usar minha localização" via navigator.geolocation.
 - Tela 7: participações NÃO são reequilibradas ao vincular; total ≠ 100% mostra erro e bloqueia; todos entram como proprietário (sem seletor de papel); busca carrega a 1ª página ao abrir.
+
+- Relevo dos talhões (2026-11-23): frames novos desenhados no Figma e aprovados pelo usuário, na seção `67:960` da página `1:4`:
+  - 04b `67:961`: aba Relevo;
+  - 04c `67:1276`: detalhe do talhão;
+  - 04d `71:1086`: modal de ajuste manual;
+  - 04e `67:1906`: ainda não calculado e progresso.
+
+  Componentes locais: `Relevo · Selo de classe` (`67:2239`) e `Relevo · Linha do talhão` (`67:2240`). ADR 0021 aceito e implementado (2026-11-24; backend Go, migrações 000019-000021 e front com API real; o mock `terrainMock.ts` só no modo `NUXT_PUBLIC_API_MOCK=true`; `NUXT_PUBLIC_API_MOCK_PENDING=true` já usa a API real no relevo; conformidade do contrato conferida campo a campo, sem divergência de forma). Contrato (`getFarmTerrain`, `calculateFarmTerrain`, `getFieldTerrain`, `adjustFieldTerrain`, `removeFieldTerrainAdjustment`). Front implementado em 2026-11-24 (contrato em `.claude/contratos/tela-21.md`, aba `?tab=terrain`, mock em `terrainMock.ts`/`terrainSeed.ts`, 857 testes passando): revisão APROVADO COM RESSALVAS, os 2 🟡 (corrida de respostas e alerta de erro preso) foram corrigidos. A fidelidade visual contra o Figma não foi conferida pelo revisor (MCP sem autenticação no ambiente dele); a carga do bloco real do Copernicus segue pendente. Permissão de escrita: `registry.write` (a nota do Figma que sugeria `terrain.manage` foi superada pelo ADR).
 
 - Formulários com dados sensíveis (senha, CPF/CNPJ, contato) usam `<form method="post" novalidate @submit.prevent>`: um envio antes da hidratação nunca coloca os dados na URL. Só a busca global (`AppTopbar`) usa GET.
 

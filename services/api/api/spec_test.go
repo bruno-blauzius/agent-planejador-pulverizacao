@@ -49,7 +49,7 @@ func TestSpecIsEmbeddedAndDeclaresHealthPaths(t *testing.T) {
 	}
 }
 
-// Toda operação de administração de usuários e empresas declara a permissão que exige.
+// Toda operação de administração e toda escrita do cadastro declara a permissão que exige.
 func TestAdministrationOperationsDeclareTheirPermission(t *testing.T) {
 	content := string(apispec.Spec)
 	want := map[string]string{
@@ -58,6 +58,14 @@ func TestAdministrationOperationsDeclareTheirPermission(t *testing.T) {
 		"resendInvitation": "users.manage", "cancelInvitation": "users.manage",
 		"listCompanies": "companies.manage", "getCompaniesSummary": "companies.manage", "getCompany": "companies.manage",
 		"createCompany": "companies.manage", "updateCompany": "companies.manage", "deleteCompany": "companies.manage",
+		"createFarm": "registry.write", "updateFarm": "registry.write", "importFarmPerimeter": "registry.write",
+		"createOwner": "registry.write", "updateOwner": "registry.write", "replaceOwnerLinks": "registry.write",
+		"createField": "registry.write", "updateField": "registry.write",
+		"uploadOwnerDocument": "registry.write", "removeOwnerDocument": "registry.write",
+		"calculateFarmTerrain": "registry.write", "adjustFieldTerrain": "registry.write",
+		"removeFieldTerrainAdjustment": "registry.write", "createRainGauge": "registry.write",
+		"updateRainGauge": "registry.write", "updateSoilProfile": "registry.write",
+		"recordRainReading": "field_conditions.record", "recordSoilInspection": "field_conditions.record",
 	}
 	for operation, permission := range want {
 		t.Run(operation, func(t *testing.T) {
@@ -84,8 +92,17 @@ func TestImplementedOperationsAreMarked(t *testing.T) {
 		"createInvitation", "resendInvitation", "cancelInvitation",
 		"listCompanies", "createCompany", "getCompaniesSummary", "getCompany", "updateCompany", "deleteCompany",
 		"getMyProfile", "updateMyProfile",
+		"listFarms", "getFarm", "createFarm", "updateFarm", "importFarmPerimeter",
+		"listOwners", "getOwner", "createOwner", "updateOwner", "getOwnerLinks", "replaceOwnerLinks",
+		"listFarmFields", "createField", "updateField", "listCrops",
+		"uploadOwnerDocument", "downloadOwnerDocument", "removeOwnerDocument",
+		"getFarmTerrain", "calculateFarmTerrain", "getFieldTerrain", "adjustFieldTerrain", "removeFieldTerrainAdjustment",
+		"listRainGauges", "createRainGauge", "updateRainGauge", "listRainReadings", "recordRainReading",
+		"recordSoilInspection", "getSoilProfile", "updateSoilProfile", "getFieldTrafficability",
 	}
-	stillPlanned := []string{"login", "changeMyPassword", "listFarms", "getDashboard", "sendPlannerMessage"}
+	stillPlanned := []string{
+		"login", "changeMyPassword", "getDashboard", "sendPlannerMessage", "listApplications",
+	}
 
 	statusOf := func(operation string) string {
 		_, after, found := strings.Cut(content, "operationId: "+operation+"\n")

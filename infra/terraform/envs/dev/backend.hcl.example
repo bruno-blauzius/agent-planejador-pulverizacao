@@ -1,0 +1,7 @@
+# Copie para backend.hcl (não versionado) e preencha. O bucket de estado é criado à parte,
+# uma vez por conta, com versionamento e criptografia ligados.
+bucket       = "<bucket-de-estado-do-terraform>"
+key          = "agentes-agro/dev/owner-documents.tfstate"
+region       = "sa-east-1"
+encrypt      = true
+use_lockfile = true

@@ -292,6 +292,26 @@ describe('http owner service', () => {
     })
   })
 
+  it('sends owner documents as multipart and links the download to the API', async () => {
+    const { api, calls } = servicesWith(call =>
+      call.options.method === 'POST'
+        ? { id: 'd-1', kind: 'id_card', file_name: 'rg.pdf', uploaded_at: '2026-11-23T12:00:00Z' }
+        : undefined)
+    const file = new Blob(['%PDF-1.7'], { type: 'application/pdf' })
+
+    const document = await api.owners.uploadDocument('o-1', { kind: 'id_card', file, fileName: 'rg.pdf' })
+    await api.owners.removeDocument('o-1', 'd-1')
+
+    expect(document).toEqual({ id: 'd-1', kind: 'id_card', fileName: 'rg.pdf', uploadedAt: new Date('2026-11-23T12:00:00Z') })
+    expect(calls[0]?.path).toBe('/owners/o-1/documents')
+    const body = calls[0]?.options.body
+    expect(body).toBeInstanceOf(FormData)
+    expect((body as FormData).get('kind')).toBe('id_card')
+    expect(((body as FormData).get('file') as File).name).toBe('rg.pdf')
+    expect(calls[1]).toMatchObject({ path: '/owners/o-1/documents/d-1', options: { method: 'DELETE' } })
+    expect(api.owners.documentUrl('o-1', 'd-1')).toBe('http://localhost:8002/owners/o-1/documents/d-1/content')
+  })
+
   it('wraps links in the PUT body', async () => {
     const { api, calls } = servicesWith(() => ({ items: [] }))
     await api.owners.replaceLinks('o-1', [{ farmId: 'f-1', role: 'tenant', sharePercent: null }])

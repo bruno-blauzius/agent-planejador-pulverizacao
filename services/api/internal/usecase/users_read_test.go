@@ -215,7 +215,8 @@ func TestProfile(t *testing.T) {
 }
 
 func TestSettingsValidate(t *testing.T) {
-	good := usecase.Settings{InvitationTTL: 1, TrialDuration: 1, DefaultPageSize: 10, MaxPageSize: 100}
+	areas := domain.AreaRules{MinFarmAreaHa: 0.1, MinFieldAreaHa: 0.01, ToleranceM2: 10}
+	good := usecase.Settings{InvitationTTL: 1, TrialDuration: 1, DefaultPageSize: 10, MaxPageSize: 100, Areas: areas, MaxDocumentBytes: 1}
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -225,6 +226,10 @@ func TestSettingsValidate(t *testing.T) {
 		"default > max":  {InvitationTTL: 1, TrialDuration: 1, DefaultPageSize: 200, MaxPageSize: 100},
 		"no page size":   {InvitationTTL: 1, TrialDuration: 1, MaxPageSize: 100},
 		"negative stamp": {InvitationTTL: 1, TrialDuration: 1, LastAccessInterval: -1, DefaultPageSize: 10, MaxPageSize: 100},
+		"no farm area":   {InvitationTTL: 1, TrialDuration: 1, DefaultPageSize: 10, MaxPageSize: 100, Areas: domain.AreaRules{MinFieldAreaHa: 1}},
+		"no field area":  {InvitationTTL: 1, TrialDuration: 1, DefaultPageSize: 10, MaxPageSize: 100, Areas: domain.AreaRules{MinFarmAreaHa: 1}},
+		"negative tolerance": {InvitationTTL: 1, TrialDuration: 1, DefaultPageSize: 10, MaxPageSize: 100,
+			Areas: domain.AreaRules{MinFarmAreaHa: 1, MinFieldAreaHa: 1, ToleranceM2: -1}},
 	} {
 		if bad.Validate() == nil {
 			t.Errorf("%s: want error", name)

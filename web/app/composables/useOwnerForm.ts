@@ -1,6 +1,6 @@
 import { computed, reactive, ref, shallowRef, watch, type ComputedRef, type Ref, type WritableComputedRef } from 'vue'
 import type { ApiError } from '~/services/errors'
-import type { LinkRole, Owner, OwnerFarmLink, OwnerFarmLinkInput, OwnerInput, PersonType } from '~/types/owner'
+import type { LinkRole, Owner, OwnerDocument, OwnerFarmLink, OwnerFarmLinkInput, OwnerInput, PersonType } from '~/types/owner'
 import { formatPercent, maskDocument } from '~/utils/format'
 import {
   currentSharesLabel,
@@ -424,6 +424,13 @@ export function useOwnerForm(options: OwnerFormOptions): OwnerForm {
     goToLinks,
     backToData,
     submit,
+    ownerId: computed(() => savedOwnerId.value),
+    documents: computed(() => ownerSource?.owner.value?.documents ?? []),
+    documentsPending: computed(() => ownerSource?.owner.value?.hasPendingDocuments ?? true),
+    refreshOwner: async () => {
+      // The form keeps what the user typed: it is filled only once (see the watch above).
+      await ownerSource?.refresh()
+    },
     loading: computed(() => ownerSource?.pending.value ?? false),
     linksLoading: computed(() => farmsSource?.pending.value ?? false),
     loadError: computed(() => ownerSource?.error.value ?? farmsSource?.error.value ?? null),
@@ -460,6 +467,13 @@ export interface OwnerForm {
   readonly goToLinks: () => boolean
   readonly backToData: () => void
   readonly submit: () => Promise<OwnerFormResult | null>
+  /** Id of the owner being edited (null until it exists). */
+  readonly ownerId: ComputedRef<string | null>
+  /** Edit: documents of the owner and whether a required one is missing (from the API). */
+  readonly documents: ComputedRef<readonly OwnerDocument[]>
+  readonly documentsPending: ComputedRef<boolean>
+  /** Edit: reloads the owner (documents, pending flag) without touching the typed values. */
+  readonly refreshOwner: () => Promise<void>
   readonly loading: ComputedRef<boolean>
   readonly linksLoading: ComputedRef<boolean>
   readonly loadError: ComputedRef<ApiError | null>

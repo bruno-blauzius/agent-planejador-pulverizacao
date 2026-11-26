@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/domain"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/usecase"
 )
 
@@ -27,10 +28,22 @@ var (
 		"uq_companies_document":             usecase.ErrDocumentAlreadyRegistered,
 		"uq_user_identities_issuer_subject": usecase.ErrIdentityAlreadyLinked,
 		"uq_user_identities_user_issuer":    usecase.ErrIdentityAlreadyLinked,
+		"uq_owners_company_document":        usecase.ErrOwnerDocumentTaken,
+		"uq_fields_farm_name":               domain.Invalid("name", "já existe um talhão com esse nome na fazenda"),
+		"uq_rain_gauges_farm_name":          domain.Invalid("name", "já existe um pluviômetro com esse nome na fazenda"),
+		"uq_rain_readings_gauge_observed":   domain.Invalid("observed_at", "já existe uma leitura desse pluviômetro nesse horário"),
 	}
 	foreignKeyViolations = map[string]error{
 		"fk_user_farm_access_farm": usecase.ErrFarmNotInCompany,
 		"fk_users_primary_farm":    usecase.ErrFarmNotInCompany,
+		// The use case checks the gauge first; this catches a race with its removal.
+		"fk_rain_gauge_fields_gauge": domain.Invalid("rain_gauge_id", "pluviômetro não encontrado nesta fazenda"),
+	}
+	// checkViolations are CHECKs only the database can decide (geometry validity).
+	checkViolations = map[string]error{
+		"ck_farms_perimeter_valid": domain.Invalid("location.perimeter", "perímetro inválido (polígono com autointerseção)"),
+		"ck_fields_polygon_valid":  domain.Invalid("polygon", "o polígono do talhão é inválido (autointerseção)"),
+		"ck_fields_area":           domain.Invalid("polygon", "o talhão precisa ter área"),
 	}
 )
 
@@ -72,6 +85,9 @@ func translateWrite(operation string, err error) error {
 		}
 		return fmt.Errorf("%s: %w", operation, &IntegrityError{Kind: "foreign_key", Constraint: pgErr.ConstraintName, Err: err})
 	case sqlStateCheck:
+		if mapped, ok := checkViolations[pgErr.ConstraintName]; ok {
+			return fmt.Errorf("%s: %w", operation, mapped)
+		}
 		return fmt.Errorf("%s: %w", operation, &IntegrityError{Kind: "check", Constraint: pgErr.ConstraintName, Err: err})
 	case sqlStateNotNullViolation:
 		return fmt.Errorf("%s: %w", operation, &IntegrityError{Kind: "not_null", Constraint: pgErr.ColumnName, Err: err})

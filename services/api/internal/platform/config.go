@@ -5,6 +5,7 @@ package platform
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -25,6 +26,10 @@ const (
 	defaultLastAccessInterval = 5 * time.Minute
 	defaultPageSize           = 20
 	defaultMaxPageSize        = 100
+	defaultFarmMinAreaHa      = 0.1
+	defaultFieldMinAreaHa     = 0.01
+	defaultFieldToleranceM2   = 10.0
+	defaultOwnerDocumentBytes = 10 << 20
 )
 
 // Config is the immutable runtime configuration of the API.
@@ -44,6 +49,11 @@ type Config struct {
 	LastAccessInterval time.Duration // API_LAST_ACCESS_INTERVAL (0 disables the limit)
 	PageSizeDefault    int           // API_PAGE_SIZE_DEFAULT
 	PageSizeMax        int           // API_PAGE_SIZE_MAX
+	FarmMinAreaHa      float64       // API_FARM_MIN_AREA_HA
+	FieldMinAreaHa     float64       // API_FIELD_MIN_AREA_HA
+	FieldToleranceM2   float64       // API_FIELD_GEOMETRY_TOLERANCE_M2
+	// OwnerDocumentMaxBytes is the upload limit of an owner document.
+	OwnerDocumentMaxBytes int64 // API_OWNER_DOCUMENT_MAX_BYTES
 }
 
 // LookupFunc matches os.LookupEnv, so tests can inject a fake environment.
@@ -55,7 +65,10 @@ type LookupFunc func(key string) (string, bool)
 // separated origins such as http://localhost:3000; unset or empty disables CORS),
 // API_INVITATION_TTL (default 72h), API_TRIAL_DURATION (default 336h),
 // API_LAST_ACCESS_INTERVAL (default 5m, 0 disables the limit),
-// API_PAGE_SIZE_DEFAULT (default 20) and API_PAGE_SIZE_MAX (default 100).
+// API_PAGE_SIZE_DEFAULT (default 20), API_PAGE_SIZE_MAX (default 100),
+// API_FARM_MIN_AREA_HA (default 0.1), API_FIELD_MIN_AREA_HA (default 0.01) and
+// API_FIELD_GEOMETRY_TOLERANCE_M2 (default 10; 0 accepts no overlap at all) and
+// API_OWNER_DOCUMENT_MAX_BYTES (default 10485760).
 func LoadConfig(lookup LookupFunc) (Config, error) {
 	cfg := Config{
 		Port:              defaultPort,
@@ -65,11 +78,15 @@ func LoadConfig(lookup LookupFunc) (Config, error) {
 		ProbeTimeout:      defaultProbeTimeout,
 		DocsEnabled:       defaultDocsEnabled,
 
-		InvitationTTL:      defaultInvitationTTL,
-		TrialDuration:      defaultTrialDuration,
-		LastAccessInterval: defaultLastAccessInterval,
-		PageSizeDefault:    defaultPageSize,
-		PageSizeMax:        defaultMaxPageSize,
+		InvitationTTL:         defaultInvitationTTL,
+		TrialDuration:         defaultTrialDuration,
+		LastAccessInterval:    defaultLastAccessInterval,
+		PageSizeDefault:       defaultPageSize,
+		PageSizeMax:           defaultMaxPageSize,
+		FarmMinAreaHa:         defaultFarmMinAreaHa,
+		FieldMinAreaHa:        defaultFieldMinAreaHa,
+		FieldToleranceM2:      defaultFieldToleranceM2,
+		OwnerDocumentMaxBytes: defaultOwnerDocumentBytes,
 	}
 
 	if raw, ok := lookup("API_PORT"); ok {
@@ -185,6 +202,42 @@ func loadBusinessSettings(lookup LookupFunc, cfg *Config) error {
 	}
 	if cfg.PageSizeDefault > cfg.PageSizeMax {
 		return fmt.Errorf("API_PAGE_SIZE_DEFAULT (%d) must not exceed API_PAGE_SIZE_MAX (%d)", cfg.PageSizeDefault, cfg.PageSizeMax)
+	}
+	if err := loadAreaSettings(lookup, cfg); err != nil {
+		return err
+	}
+	if raw, ok := lookup("API_OWNER_DOCUMENT_MAX_BYTES"); ok {
+		value, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+		if err != nil || value < 1 {
+			return fmt.Errorf("invalid API_OWNER_DOCUMENT_MAX_BYTES %q: must be a positive integer (bytes)", raw)
+		}
+		cfg.OwnerDocumentMaxBytes = value
+	}
+	return nil
+}
+
+// loadAreaSettings reads the area limits of farms and fields (decimals). The
+// minimum areas must be positive; the drawing tolerance may be zero.
+func loadAreaSettings(lookup LookupFunc, cfg *Config) error {
+	areas := []struct {
+		key       string
+		target    *float64
+		allowZero bool
+	}{
+		{"API_FARM_MIN_AREA_HA", &cfg.FarmMinAreaHa, false},
+		{"API_FIELD_MIN_AREA_HA", &cfg.FieldMinAreaHa, false},
+		{"API_FIELD_GEOMETRY_TOLERANCE_M2", &cfg.FieldToleranceM2, true},
+	}
+	for _, area := range areas {
+		raw, ok := lookup(area.key)
+		if !ok {
+			continue
+		}
+		value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil || math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || (value == 0 && !area.allowZero) {
+			return fmt.Errorf("invalid %s %q: must be a positive decimal such as 0.5", area.key, raw)
+		}
+		*area.target = value
 	}
 	return nil
 }

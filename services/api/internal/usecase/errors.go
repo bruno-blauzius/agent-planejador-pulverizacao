@@ -42,6 +42,23 @@ var (
 	ErrIdentityAlreadyLinked = errors.New("identity already linked")
 	// ErrFarmNotInCompany: a selected farm does not belong to the company (422).
 	ErrFarmNotInCompany = errors.New("farm does not belong to the company")
+	// ErrOwnerDocumentTaken: the CPF/CNPJ already belongs to an owner of the company (409 conflict).
+	ErrOwnerDocumentTaken = errors.New("owner document already registered")
+	// ErrUnsupportedDocumentMedia: an owner document is not PDF, JPEG or PNG (415).
+	ErrUnsupportedDocumentMedia = errors.New("unsupported owner document media type")
+	// ErrDocumentStorageUnavailable: the object storage of owner documents is
+	// down or not configured (503 document_storage_unavailable).
+	ErrDocumentStorageUnavailable = errors.New("document storage unavailable")
+	// ErrElevationUnavailable: the elevation model has no data for a tile (it
+	// does not exist, e.g. over the ocean) or the download failed (ADR 0021).
+	// The field ends as failed with this reason; nothing is invented.
+	ErrElevationUnavailable = errors.New("elevation data unavailable")
+	// ErrElevationTimeout: the database canceled an elevation statement for taking
+	// too long (SQLSTATE 57014, statement_timeout). The field ends as failed with the
+	// timeout reason, like a context deadline.
+	ErrElevationTimeout = errors.New("elevation operation timed out")
+	// ErrUnsupportedPerimeterFormat: the perimeter file is not KML, KMZ, GeoJSON or a zipped Shapefile (415).
+	ErrUnsupportedPerimeterFormat = errors.New("unsupported perimeter file format")
 
 	// ErrIdentityProviderUnavailable: the identity provider is down or refused
 	// the operation (502 identity_provider_unavailable). Nothing is left half-registered.

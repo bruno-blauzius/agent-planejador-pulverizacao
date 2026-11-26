@@ -202,19 +202,19 @@ function onShareInput(farmId: string, event: Event) {
         </div>
       </section>
 
-      <!-- Documents: no upload endpoint yet (decision 1 of the screen contract). -->
-      <div v-if="isEdit" class="owner-form__document">
-        <span class="owner-form__document-icon" aria-hidden="true"><AppIcon name="alert" :size="18" /></span>
-        <div class="owner-form__document-text">
-          <p class="text-label-strong">RG ou CNH</p>
-          <p class="owner-form__muted text-body-sm">Nenhum arquivo enviado · envio de documentos em breve</p>
-        </div>
-        <BaseButton variant="secondary" size="sm" icon="plus" disabled>Enviar agora</BaseButton>
-      </div>
+      <!-- Documents (ADR 0020): sent once the owner exists, so only while editing. -->
+      <OwnerDocuments
+        v-if="isEdit && form.ownerId.value"
+        :owner-id="form.ownerId.value"
+        :person-type="personType"
+        :documents="form.documents.value"
+        :pending="form.documentsPending.value"
+        @changed="form.refreshOwner()"
+      />
       <FileDropzone
         v-else-if="mode !== 'wizard'"
         title="Documento com foto (opcional)"
-        description="RG ou CNH · envio de documentos em breve"
+        description="RG, CNH ou contrato social · envie depois de salvar, ao editar o proprietário"
         disabled
       />
 
@@ -387,36 +387,6 @@ function onShareInput(farmId: string, event: Event) {
 
 .owner-form__wizard-hint {
   color: var(--color-status-attention);
-}
-
-/* Edit: documents block (Figma 39:1942). */
-.owner-form__document {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-12);
-  align-items: center;
-  padding: var(--space-14);
-  border-radius: var(--radius-tile-lg);
-  background: var(--color-status-attention-bg);
-}
-
-.owner-form__document-icon {
-  display: grid;
-  place-items: center;
-  width: var(--size-icon-tile-md);
-  height: var(--size-icon-tile-md);
-  flex-shrink: 0;
-  border-radius: var(--radius-tile);
-  background: var(--color-white);
-  color: var(--color-status-attention);
-}
-
-.owner-form__document-text {
-  display: flex;
-  flex: 1 1 var(--form-field-min-width);
-  flex-direction: column;
-  gap: var(--space-2);
-  min-width: 0;
 }
 
 /* Edit: links summary (Figma 39:1956). */

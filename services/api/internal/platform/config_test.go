@@ -23,6 +23,7 @@ func TestLoadConfig(t *testing.T) {
 		ProbeTimeout: 2 * time.Second, DocsEnabled: true,
 		InvitationTTL: 72 * time.Hour, TrialDuration: 14 * 24 * time.Hour, LastAccessInterval: 5 * time.Minute,
 		PageSizeDefault: 20, PageSizeMax: 100,
+		FarmMinAreaHa: 0.1, FieldMinAreaHa: 0.01, FieldToleranceM2: 10, OwnerDocumentMaxBytes: 10 << 20,
 	}
 	lowestPort := defaults
 	lowestPort.Port = 1
@@ -35,6 +36,8 @@ func TestLoadConfig(t *testing.T) {
 	businessValues.LastAccessInterval = 0
 	businessValues.PageSizeDefault = 10
 	businessValues.PageSizeMax = 50
+	areaValues := defaults
+	areaValues.FarmMinAreaHa, areaValues.FieldMinAreaHa, areaValues.FieldToleranceM2 = 1.5, 0.2, 0
 
 	tests := []struct {
 		name    string
@@ -56,6 +59,7 @@ func TestLoadConfig(t *testing.T) {
 				ProbeTimeout: 500 * time.Millisecond, DocsEnabled: false,
 				InvitationTTL: 72 * time.Hour, TrialDuration: 14 * 24 * time.Hour, LastAccessInterval: 5 * time.Minute,
 				PageSizeDefault: 20, PageSizeMax: 100,
+				FarmMinAreaHa: 0.1, FieldMinAreaHa: 0.01, FieldToleranceM2: 10, OwnerDocumentMaxBytes: 10 << 20,
 			},
 		},
 		{
@@ -72,6 +76,15 @@ func TestLoadConfig(t *testing.T) {
 		{name: "page size zero is rejected", env: map[string]string{"API_PAGE_SIZE_DEFAULT": "0"}, wantErr: true},
 		{name: "page size default above max is rejected", env: map[string]string{"API_PAGE_SIZE_DEFAULT": "200"}, wantErr: true},
 		{name: "page size not a number is rejected", env: map[string]string{"API_PAGE_SIZE_MAX": "many"}, wantErr: true},
+		{
+			name: "area limits are read",
+			env:  map[string]string{"API_FARM_MIN_AREA_HA": "1.5", "API_FIELD_MIN_AREA_HA": "0.2", "API_FIELD_GEOMETRY_TOLERANCE_M2": "0"},
+			want: areaValues,
+		},
+		{name: "farm minimum area zero is rejected", env: map[string]string{"API_FARM_MIN_AREA_HA": "0"}, wantErr: true},
+		{name: "field minimum area not a number is rejected", env: map[string]string{"API_FIELD_MIN_AREA_HA": "small"}, wantErr: true},
+		{name: "document limit zero is rejected", env: map[string]string{"API_OWNER_DOCUMENT_MAX_BYTES": "0"}, wantErr: true},
+		{name: "negative tolerance is rejected", env: map[string]string{"API_FIELD_GEOMETRY_TOLERANCE_M2": "-1"}, wantErr: true},
 		{name: "port at lower bound", env: map[string]string{"API_PORT": "1"}, want: lowestPort},
 		{name: "port zero is rejected", env: map[string]string{"API_PORT": "0"}, wantErr: true},
 		{name: "port above range is rejected", env: map[string]string{"API_PORT": "65536"}, wantErr: true},

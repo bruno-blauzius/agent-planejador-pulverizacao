@@ -15,6 +15,13 @@ export interface OwnerDocument {
   readonly uploadedAt: Date
 }
 
+/** A file chosen to be sent as an owner document. */
+export interface OwnerDocumentUpload {
+  readonly kind: OwnerDocumentKind
+  readonly file: Blob
+  readonly fileName: string
+}
+
 export interface OwnerFarmLink {
   readonly farmId: string
   readonly farmName: string

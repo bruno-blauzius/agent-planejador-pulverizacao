@@ -25,6 +25,13 @@ type Settings struct {
 	// Env: API_PAGE_SIZE_DEFAULT and API_PAGE_SIZE_MAX (integers).
 	DefaultPageSize int
 	MaxPageSize     int
+	// Areas bounds the size of farms and fields and the drawing tolerance.
+	// Env: API_FARM_MIN_AREA_HA, API_FIELD_MIN_AREA_HA and
+	// API_FIELD_GEOMETRY_TOLERANCE_M2 (decimals).
+	Areas domain.AreaRules
+	// MaxDocumentBytes is the upload limit of an owner document.
+	// Env: API_OWNER_DOCUMENT_MAX_BYTES (integer, default 10 MB).
+	MaxDocumentBytes int64
 }
 
 // Validate rejects settings that would break use cases.
@@ -38,6 +45,12 @@ func (s Settings) Validate() error {
 		return errors.New("last access interval must not be negative")
 	case s.DefaultPageSize <= 0 || s.MaxPageSize < s.DefaultPageSize:
 		return errors.New("page sizes must satisfy 0 < default <= max")
+	case s.Areas.MinFarmAreaHa <= 0 || s.Areas.MinFieldAreaHa <= 0:
+		return errors.New("minimum farm and field areas must be positive")
+	case s.Areas.ToleranceM2 < 0:
+		return errors.New("field geometry tolerance must not be negative")
+	case s.MaxDocumentBytes <= 0:
+		return errors.New("owner document size limit must be positive")
 	}
 	return nil
 }

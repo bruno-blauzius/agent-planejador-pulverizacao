@@ -48,6 +48,9 @@ const (
 	PermApplicationsRegister Permission = "applications.register"
 	PermApplicationsConfirm  Permission = "applications.confirm"
 	PermPlannerUse           Permission = "planner.use"
+	// PermFieldConditionsRecord lets a user record rain gauge readings and soil
+	// inspections (ADR 0022, addendum item 5).
+	PermFieldConditionsRecord Permission = "field_conditions.record"
 )
 
 // Permissions lists the known permissions in canonical order.
@@ -61,6 +64,7 @@ func Permissions() []Permission {
 		PermApplicationsRegister,
 		PermApplicationsConfirm,
 		PermPlannerUse,
+		PermFieldConditionsRecord,
 	}
 }
 

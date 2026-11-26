@@ -1,0 +1,6 @@
+{"type": "FeatureCollection", "features": [
+  {"type": "Feature", "properties": {"codarea": "3128709"},
+   "geometry": {"type": "Polygon", "coordinates": [[[-46.8, -21.4], [-46.8, -21.2], [-46.6, -21.2], [-46.6, -21.4], [-46.8, -21.4]]]}},
+  {"type": "Feature", "properties": {"codarea": "3550308"},
+   "geometry": {"type": "MultiPolygon", "coordinates": [[[[-46.8, -23.7], [-46.8, -23.4], [-46.4, -23.4], [-46.4, -23.7], [-46.8, -23.7]]]]}}
+]}

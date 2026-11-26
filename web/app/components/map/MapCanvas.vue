@@ -3,6 +3,8 @@ import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent } from 'mapl
 import {
   boundsOf,
   createMapStyle,
+  FEATURE_DASHED_PATTERN,
+  FEATURE_DASHED_WIDTH,
   FEATURE_FILL_OPACITY,
   FEATURE_OUTLINE_COLOR,
   FEATURE_OUTLINE_OPACITY,
@@ -12,6 +14,7 @@ import {
   FIT_MAX_ZOOM,
   featureFillColor,
   labelAnchorOf,
+  LAYER_FEATURES_DASHED,
   LAYER_FEATURES_FILL,
   LAYER_FEATURES_OUTLINE,
   LAYER_FEATURES_SELECTED,
@@ -45,6 +48,8 @@ function toMutableGeometry(geometry: PerimeterGeometry) {
 const props = defineProps<{
   features: readonly MapFeature[]
   colorBy: MapColorBy
+  /** Color per `terrainKey` when `colorBy` is 'terrain'. */
+  terrainPalette: Readonly<Record<string, string>>
   selectedId: string | null
   basemap: MapBasemap
   interactive: boolean
@@ -83,6 +88,14 @@ const containerRef = ref<HTMLElement | null>(null)
 let map: MapLibreMap | null = null
 let projectFrame: number | null = null
 let drawController: DrawController | null = null
+/**
+ * The style is loaded and the data layers exist. Not `map.loaded()`: that one is
+ * false whenever a tile or source is still loading, which is most of the time
+ * on a map that just moved, and would skip restarting the drawing tool.
+ */
+let isStyleReady = false
+/** Bumped on every teardown, so a drawing tool that finishes loading late is discarded. */
+let drawGeneration = 0
 /** Last value seen by the drawing tool (from the parent or from a finished stroke). */
 let latestDrawValue: MapDrawValue | null = props.drawValue
 
@@ -111,6 +124,8 @@ const featureCollection = computed<GeoJsonData>(() => ({
       status: feature.status ?? null,
       cropIndex: toCropIndex(feature.cropIndex),
       outlineOnly: feature.outlineOnly === true,
+      terrainKey: feature.terrainKey ?? null,
+      dashed: feature.dashed === true,
     },
   })),
 }))
@@ -132,7 +147,7 @@ function addDataLayers(target: MapLibreMap) {
     type: 'fill',
     source: SOURCE_FEATURES,
     paint: {
-      'fill-color': featureFillColor(props.colorBy),
+      'fill-color': featureFillColor(props.colorBy, props.terrainPalette),
       'fill-opacity': ['case', ['get', 'outlineOnly'], 0, FEATURE_FILL_OPACITY],
     },
   })
@@ -140,7 +155,16 @@ function addDataLayers(target: MapLibreMap) {
     id: LAYER_FEATURES_OUTLINE,
     type: 'line',
     source: SOURCE_FEATURES,
+    // Dashed features have their own layer, so the two patterns never overlap.
+    filter: ['!=', ['get', 'dashed'], true],
     paint: { 'line-color': FEATURE_OUTLINE_COLOR, 'line-opacity': FEATURE_OUTLINE_OPACITY, 'line-width': FEATURE_OUTLINE_WIDTH },
+  })
+  target.addLayer({
+    id: LAYER_FEATURES_DASHED,
+    type: 'line',
+    source: SOURCE_FEATURES,
+    filter: ['==', ['get', 'dashed'], true],
+    paint: { 'line-color': FEATURE_OUTLINE_COLOR, 'line-width': FEATURE_DASHED_WIDTH, 'line-dasharray': FEATURE_DASHED_PATTERN },
   })
   target.addLayer({
     id: LAYER_FEATURES_SELECTED,
@@ -254,6 +278,7 @@ async function createMap() {
   })
   instance.on('load', () => {
     isLoaded = true
+    isStyleReady = true
     addDataLayers(instance)
     fitToFeatures(false)
     emit('ready')
@@ -289,8 +314,8 @@ watch(featureCollection, (data) => {
 
 // Before the style loads (or during a basemap swap) the data layers do not exist yet;
 // addDataLayers reads the current props when it creates them.
-watch(() => props.colorBy, (colorBy) => {
-  if (map?.getLayer(LAYER_FEATURES_FILL)) map.setPaintProperty(LAYER_FEATURES_FILL, 'fill-color', featureFillColor(colorBy))
+watch(() => [props.colorBy, props.terrainPalette] as const, ([colorBy, terrainColors]) => {
+  if (map?.getLayer(LAYER_FEATURES_FILL)) map.setPaintProperty(LAYER_FEATURES_FILL, 'fill-color', featureFillColor(colorBy, terrainColors))
 })
 
 watch(() => props.selectedId, (id) => {
@@ -303,6 +328,7 @@ watch(() => props.selectedId, (id) => {
 function setupDraw(target: MapLibreMap) {
   const mode = props.drawMode
   if (!mode) return
+  const generation = drawGeneration
   void import('./mapDraw')
     .then(({ createDrawController }) => createDrawController({
       map: target,
@@ -314,8 +340,8 @@ function setupDraw(target: MapLibreMap) {
       },
     }))
     .then((controller) => {
-      // The map may have been removed while terra-draw was loading.
-      if (map !== target) {
+      // The map may have been removed, or the mode or style changed, while terra-draw was loading.
+      if (map !== target || generation !== drawGeneration) {
         controller.destroy()
         return
       }
@@ -329,6 +355,7 @@ function setupDraw(target: MapLibreMap) {
 }
 
 function teardownDraw() {
+  drawGeneration++
   drawController?.destroy()
   drawController = null
   emit('draw-ready', false)
@@ -362,15 +389,18 @@ watch(() => props.drawValue, (value) => {
 
 watch(() => props.drawMode, () => {
   teardownDraw()
-  if (map?.loaded()) setupDraw(map)
+  // Before the style is ready, the `load` (or `style.load`) handler starts the tool with the current mode.
+  if (map && isStyleReady) setupDraw(map)
 })
 
 watch(() => props.basemap, () => {
   if (!map) return
   const current = map
   teardownDraw()
+  isStyleReady = false
   current.setStyle(createMapStyle(styleOptions()))
   current.once('style.load', () => {
+    isStyleReady = true
     addDataLayers(current)
     setupDraw(current)
   })

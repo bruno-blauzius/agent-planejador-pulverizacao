@@ -33,6 +33,8 @@ export interface Action<Args extends unknown[], R> {
   readonly execute: (...args: Args) => Promise<R | null>
   readonly pending: Readonly<Ref<boolean>>
   readonly error: Readonly<Ref<ApiError | null>>
+  /** Forgets the last error (dismissed alert, another context). */
+  readonly clearError: () => void
 }
 
 /**
@@ -59,7 +61,7 @@ export function useAction<Args extends unknown[], R>(run: (...args: Args) => Pro
     }
   }
 
-  return { execute, pending: readonly(pending), error: readonly(error) }
+  return { execute, pending: readonly(pending), error: readonly(error), clearError: () => { error.value = null } }
 }
 
 /** Deterministic cache key for a filter object (key order and empty values ignored). */

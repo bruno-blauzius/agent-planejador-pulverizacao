@@ -7,7 +7,61 @@ package sqlcgen
 
 import (
 	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countFarms = `-- name: CountFarms :one
+
+SELECT count(*)::int
+FROM farms f
+CROSS JOIN LATERAL (
+    SELECT EXISTS (
+        SELECT 1 FROM farm_owners l
+        JOIN owners o ON o.company_id = l.company_id AND o.id = l.owner_id AND o.deleted_at IS NULL
+        WHERE l.company_id = f.company_id AND l.farm_id = f.id AND o.documents_pending
+    ) AS documents_pending
+) p
+WHERE f.company_id = $1 AND f.deleted_at IS NULL
+  AND ($2::text IS NULL
+       OR ($2::text = 'draft' AND f.status = 'draft')
+       OR ($2::text = 'active' AND f.status = 'active' AND NOT p.documents_pending)
+       OR ($2::text = 'pending' AND f.status = 'active' AND p.documents_pending))
+  AND ($3::text IS NULL OR f.production_type = $3::text)
+  AND ($4::text[] IS NULL OR f.id = ANY($4::text[]::uuid[]))
+  AND ($5::text IS NULL
+       OR unaccent(f.name) ILIKE unaccent($5::text) ESCAPE '\'
+       OR unaccent(f.code) ILIKE unaccent($5::text) ESCAPE '\'
+       OR unaccent(f.city) ILIKE unaccent($5::text) ESCAPE '\')
+`
+
+type CountFarmsParams struct {
+	CompanyID      string
+	Status         pgtype.Text
+	ProductionType pgtype.Text
+	VisibleFarmIds []string
+	Search         pgtype.Text
+}
+
+// Status "pending" (domain.DisplayStatus): fazenda ativa com algum vinculado cujo documento
+// obrigatório falta (owners.documents_pending, mantido pela aplicação). O filtro de status
+// separa active de pending do mesmo jeito.
+// Geometria entra e sai como GeoJSON (WGS84). coalesce(..., ”) evita NULL em colunas que o
+// sqlc gera como string: ” significa "sem geometria". O contorno (outline) é simplificado
+// (~10 m) para a miniatura e o modo mapa; a geometria completa só vai no detalhe.
+func (q *Queries) CountFarms(ctx context.Context, arg CountFarmsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countFarms,
+		arg.CompanyID,
+		arg.Status,
+		arg.ProductionType,
+		arg.VisibleFarmIds,
+		arg.Search,
+	)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
 
 const countFarmsInCompany = `-- name: CountFarmsInCompany :one
 SELECT count(*)::int FROM farms
@@ -24,6 +78,96 @@ func (q *Queries) CountFarmsInCompany(ctx context.Context, arg CountFarmsInCompa
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const farmExists = `-- name: FarmExists :one
+SELECT EXISTS (SELECT 1 FROM farms WHERE company_id = $1 AND id = $2 AND deleted_at IS NULL)
+`
+
+type FarmExistsParams struct {
+	CompanyID string
+	ID        string
+}
+
+func (q *Queries) FarmExists(ctx context.Context, arg FarmExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, farmExists, arg.CompanyID, arg.ID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const getFarm = `-- name: GetFarm :one
+SELECT f.id, f.company_id, f.name, f.code, f.cooperative, f.production_type, f.city, f.state, f.status,
+       f.postal_code, f.car_number,
+       coalesce(ST_AsGeoJSON(f.forecast_point, 7), '')::text AS forecast_point,
+       coalesce(ST_AsGeoJSON(f.perimeter, 7), '')::text AS perimeter,
+       coalesce(ST_AsGeoJSON(ST_SimplifyPreserveTopology(f.perimeter, 0.0001), 6), '')::text AS outline,
+       coalesce(f.perimeter_area_ha, 0)::float8 AS area_ha,
+       p.documents_pending::bool AS documents_pending,
+       f.created_at, f.updated_at, f.version
+FROM farms f
+CROSS JOIN LATERAL (
+    SELECT EXISTS (
+        SELECT 1 FROM farm_owners l
+        JOIN owners o ON o.company_id = l.company_id AND o.id = l.owner_id AND o.deleted_at IS NULL
+        WHERE l.company_id = f.company_id AND l.farm_id = f.id AND o.documents_pending
+    ) AS documents_pending
+) p
+WHERE f.company_id = $1 AND f.id = $2 AND f.deleted_at IS NULL
+`
+
+type GetFarmParams struct {
+	CompanyID string
+	ID        string
+}
+
+type GetFarmRow struct {
+	ID               string
+	CompanyID        string
+	Name             string
+	Code             pgtype.Text
+	Cooperative      pgtype.Text
+	ProductionType   string
+	City             string
+	State            string
+	Status           string
+	PostalCode       pgtype.Text
+	CarNumber        pgtype.Text
+	ForecastPoint    string
+	Perimeter        string
+	Outline          string
+	AreaHa           float64
+	DocumentsPending bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	Version          int32
+}
+
+func (q *Queries) GetFarm(ctx context.Context, arg GetFarmParams) (GetFarmRow, error) {
+	row := q.db.QueryRow(ctx, getFarm, arg.CompanyID, arg.ID)
+	var i GetFarmRow
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.Name,
+		&i.Code,
+		&i.Cooperative,
+		&i.ProductionType,
+		&i.City,
+		&i.State,
+		&i.Status,
+		&i.PostalCode,
+		&i.CarNumber,
+		&i.ForecastPoint,
+		&i.Perimeter,
+		&i.Outline,
+		&i.AreaHa,
+		&i.DocumentsPending,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
 }
 
 const getFarmRef = `-- name: GetFarmRef :one
@@ -46,4 +190,347 @@ func (q *Queries) GetFarmRef(ctx context.Context, arg GetFarmRefParams) (GetFarm
 	var i GetFarmRefRow
 	err := row.Scan(&i.ID, &i.Name)
 	return i, err
+}
+
+const insertFarm = `-- name: InsertFarm :exec
+INSERT INTO farms (id, company_id, name, code, cooperative, production_type, city, state, status,
+                   postal_code, car_number, forecast_point, perimeter, created_at, updated_at, version)
+VALUES ($1, $2, $3, $4, $5,
+        $6, $7, $8, $9,
+        $10, $11,
+        coalesce(ST_SetSRID(ST_GeomFromGeoJSON($12::text), 4326),
+                 ST_Centroid(ST_SetSRID(ST_GeomFromGeoJSON($13::text), 4326))),
+        ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($13::text), 4326)),
+        $14, $15, 1)
+`
+
+type InsertFarmParams struct {
+	ID             string
+	CompanyID      string
+	Name           string
+	Code           pgtype.Text
+	Cooperative    pgtype.Text
+	ProductionType string
+	City           string
+	State          string
+	Status         string
+	PostalCode     pgtype.Text
+	CarNumber      pgtype.Text
+	ForecastPoint  pgtype.Text
+	Perimeter      pgtype.Text
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+// Sem ponto de previsão informado, usa o centróide do perímetro.
+func (q *Queries) InsertFarm(ctx context.Context, arg InsertFarmParams) error {
+	_, err := q.db.Exec(ctx, insertFarm,
+		arg.ID,
+		arg.CompanyID,
+		arg.Name,
+		arg.Code,
+		arg.Cooperative,
+		arg.ProductionType,
+		arg.City,
+		arg.State,
+		arg.Status,
+		arg.PostalCode,
+		arg.CarNumber,
+		arg.ForecastPoint,
+		arg.Perimeter,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const listFarms = `-- name: ListFarms :many
+SELECT f.id, f.company_id, f.name, f.code, f.cooperative, f.production_type, f.city, f.state, f.status,
+       f.postal_code, f.car_number,
+       coalesce(ST_AsGeoJSON(f.forecast_point, 7), '')::text AS forecast_point,
+       coalesce(ST_AsGeoJSON(ST_SimplifyPreserveTopology(f.perimeter, 0.0001), 6), '')::text AS outline,
+       coalesce(f.perimeter_area_ha, 0)::float8 AS area_ha,
+       p.documents_pending::bool AS documents_pending,
+       f.created_at, f.updated_at, f.version
+FROM farms f
+CROSS JOIN LATERAL (
+    SELECT EXISTS (
+        SELECT 1 FROM farm_owners l
+        JOIN owners o ON o.company_id = l.company_id AND o.id = l.owner_id AND o.deleted_at IS NULL
+        WHERE l.company_id = f.company_id AND l.farm_id = f.id AND o.documents_pending
+    ) AS documents_pending
+) p
+WHERE f.company_id = $1 AND f.deleted_at IS NULL
+  AND ($2::text IS NULL
+       OR ($2::text = 'draft' AND f.status = 'draft')
+       OR ($2::text = 'active' AND f.status = 'active' AND NOT p.documents_pending)
+       OR ($2::text = 'pending' AND f.status = 'active' AND p.documents_pending))
+  AND ($3::text IS NULL OR f.production_type = $3::text)
+  AND ($4::text[] IS NULL OR f.id = ANY($4::text[]::uuid[]))
+  AND ($5::text IS NULL
+       OR unaccent(f.name) ILIKE unaccent($5::text) ESCAPE '\'
+       OR unaccent(f.code) ILIKE unaccent($5::text) ESCAPE '\'
+       OR unaccent(f.city) ILIKE unaccent($5::text) ESCAPE '\')
+ORDER BY f.name, f.id
+LIMIT $7::int OFFSET $6::int
+`
+
+type ListFarmsParams struct {
+	CompanyID      string
+	Status         pgtype.Text
+	ProductionType pgtype.Text
+	VisibleFarmIds []string
+	Search         pgtype.Text
+	PageOffset     int32
+	PageLimit      int32
+}
+
+type ListFarmsRow struct {
+	ID               string
+	CompanyID        string
+	Name             string
+	Code             pgtype.Text
+	Cooperative      pgtype.Text
+	ProductionType   string
+	City             string
+	State            string
+	Status           string
+	PostalCode       pgtype.Text
+	CarNumber        pgtype.Text
+	ForecastPoint    string
+	Outline          string
+	AreaHa           float64
+	DocumentsPending bool
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	Version          int32
+}
+
+func (q *Queries) ListFarms(ctx context.Context, arg ListFarmsParams) ([]ListFarmsRow, error) {
+	rows, err := q.db.Query(ctx, listFarms,
+		arg.CompanyID,
+		arg.Status,
+		arg.ProductionType,
+		arg.VisibleFarmIds,
+		arg.Search,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFarmsRow
+	for rows.Next() {
+		var i ListFarmsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CompanyID,
+			&i.Name,
+			&i.Code,
+			&i.Cooperative,
+			&i.ProductionType,
+			&i.City,
+			&i.State,
+			&i.Status,
+			&i.PostalCode,
+			&i.CarNumber,
+			&i.ForecastPoint,
+			&i.Outline,
+			&i.AreaHa,
+			&i.DocumentsPending,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockFarm = `-- name: LockFarm :one
+SELECT f.id, f.company_id, f.name, f.code, f.cooperative, f.production_type, f.city, f.state, f.status,
+       f.postal_code, f.car_number,
+       coalesce(ST_AsGeoJSON(f.forecast_point, 7), '')::text AS forecast_point,
+       coalesce(ST_AsGeoJSON(f.perimeter, 7), '')::text AS perimeter,
+       f.created_at, f.updated_at, f.version
+FROM farms f
+WHERE f.company_id = $1 AND f.id = $2 AND f.deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockFarmParams struct {
+	CompanyID string
+	ID        string
+}
+
+type LockFarmRow struct {
+	ID             string
+	CompanyID      string
+	Name           string
+	Code           pgtype.Text
+	Cooperative    pgtype.Text
+	ProductionType string
+	City           string
+	State          string
+	Status         string
+	PostalCode     pgtype.Text
+	CarNumber      pgtype.Text
+	ForecastPoint  string
+	Perimeter      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Version        int32
+}
+
+func (q *Queries) LockFarm(ctx context.Context, arg LockFarmParams) (LockFarmRow, error) {
+	row := q.db.QueryRow(ctx, lockFarm, arg.CompanyID, arg.ID)
+	var i LockFarmRow
+	err := row.Scan(
+		&i.ID,
+		&i.CompanyID,
+		&i.Name,
+		&i.Code,
+		&i.Cooperative,
+		&i.ProductionType,
+		&i.City,
+		&i.State,
+		&i.Status,
+		&i.PostalCode,
+		&i.CarNumber,
+		&i.ForecastPoint,
+		&i.Perimeter,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const lockFarmsByIDs = `-- name: LockFarmsByIDs :many
+SELECT f.id::text AS id
+FROM farms f
+WHERE f.company_id = $1 AND f.deleted_at IS NULL
+  AND f.id = ANY($2::text[]::uuid[])
+ORDER BY f.id
+FOR UPDATE
+`
+
+type LockFarmsByIDsParams struct {
+	CompanyID string
+	FarmIds   []string
+}
+
+// Trava em ordem de id (evita deadlock entre transações que tocam as mesmas fazendas).
+func (q *Queries) LockFarmsByIDs(ctx context.Context, arg LockFarmsByIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, lockFarmsByIDs, arg.CompanyID, arg.FarmIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const measurePerimeter = `-- name: MeasurePerimeter :one
+SELECT ST_IsValid(g.geom)::bool AS valid,
+       round((ST_Area(g.geom::geography) / 10000.0)::numeric, 4)::float8 AS area_ha,
+       ST_Y(ST_Centroid(g.geom))::float8 AS centroid_lat,
+       ST_X(ST_Centroid(g.geom))::float8 AS centroid_lng,
+       ST_Y(ST_PointOnSurface(g.geom))::float8 AS interior_lat,
+       ST_X(ST_PointOnSurface(g.geom))::float8 AS interior_lng
+FROM (SELECT ST_SetSRID(ST_GeomFromGeoJSON($1::text), 4326) AS geom) AS g
+`
+
+type MeasurePerimeterRow struct {
+	Valid       bool
+	AreaHa      float64
+	CentroidLat float64
+	CentroidLng float64
+	InteriorLat float64
+	InteriorLng float64
+}
+
+func (q *Queries) MeasurePerimeter(ctx context.Context, geojson string) (MeasurePerimeterRow, error) {
+	row := q.db.QueryRow(ctx, measurePerimeter, geojson)
+	var i MeasurePerimeterRow
+	err := row.Scan(
+		&i.Valid,
+		&i.AreaHa,
+		&i.CentroidLat,
+		&i.CentroidLng,
+		&i.InteriorLat,
+		&i.InteriorLng,
+	)
+	return i, err
+}
+
+const updateFarm = `-- name: UpdateFarm :execrows
+UPDATE farms
+SET name = $1, code = $2, cooperative = $3,
+    production_type = $4, city = $5, state = $6,
+    status = $7, postal_code = $8, car_number = $9,
+    forecast_point = coalesce(ST_SetSRID(ST_GeomFromGeoJSON($10::text), 4326),
+                              ST_Centroid(ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326))),
+    perimeter = ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($11::text), 4326)),
+    updated_at = $12, version = version + 1
+WHERE company_id = $13 AND id = $14 AND deleted_at IS NULL
+  AND version = $15
+`
+
+type UpdateFarmParams struct {
+	Name           string
+	Code           pgtype.Text
+	Cooperative    pgtype.Text
+	ProductionType string
+	City           string
+	State          string
+	Status         string
+	PostalCode     pgtype.Text
+	CarNumber      pgtype.Text
+	ForecastPoint  pgtype.Text
+	Perimeter      pgtype.Text
+	UpdatedAt      time.Time
+	CompanyID      string
+	ID             string
+	Version        int32
+}
+
+func (q *Queries) UpdateFarm(ctx context.Context, arg UpdateFarmParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateFarm,
+		arg.Name,
+		arg.Code,
+		arg.Cooperative,
+		arg.ProductionType,
+		arg.City,
+		arg.State,
+		arg.Status,
+		arg.PostalCode,
+		arg.CarNumber,
+		arg.ForecastPoint,
+		arg.Perimeter,
+		arg.UpdatedAt,
+		arg.CompanyID,
+		arg.ID,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

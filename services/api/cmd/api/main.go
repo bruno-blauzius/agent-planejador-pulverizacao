@@ -17,11 +17,27 @@ import (
 	apispec "github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/api"
 	httpadapter "github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/http"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/keycloak"
+	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/objectstorage"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/oidc"
+	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/perimeter"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/postgres"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/platform"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/usecase"
 )
+
+// documentStorage builds the S3 store of owner documents, or the disabled one
+// when no bucket is configured (document routes answer 503; the rest works).
+func documentStorage(ctx context.Context, cfg appConfig, logger *slog.Logger) (usecase.DocumentStorage, error) {
+	if !cfg.DocumentsEnabled {
+		logger.Warn("owner documents disabled: API_DOCUMENTS_BUCKET is not set")
+		return objectstorage.Disabled{}, nil
+	}
+	store, err := objectstorage.NewS3Store(ctx, cfg.Documents)
+	if err != nil {
+		return nil, fmt.Errorf("owner document storage: %w", err)
+	}
+	return store, nil
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -75,9 +91,37 @@ func run() error {
 	}
 	sessionConfig := oidcService.Config()
 
-	groups := newRouteGroups(dependencies{
-		Logger: logger, Store: database, Identity: identity, Clock: clock, IDs: ids, Settings: settings,
-	})
+	documents, err := documentStorage(ctx, cfg, logger)
+	if err != nil {
+		return err
+	}
+	// The relief executor reads and writes through the same pool and downloads
+	// blocks from the elevation source; the use cases only get its wakeup.
+	terrain, err := buildTerrainRuntime(cfg.Terrain, database, database, newCopernicusSource(cfg.Terrain.Elevation), clock, logger)
+	if err != nil {
+		return err
+	}
+	trafficability, err := trafficabilitySettings(cfg.Trafficability)
+	if err != nil {
+		return err
+	}
+	weather, err := newWeatherProvider(cfg.Trafficability.Weather, trafficability.Location, clock, logger)
+	if err != nil {
+		return err
+	}
+	wired := dependencies{
+		Logger: logger, Store: database, Registry: database, PerimeterParser: perimeter.NewParser(),
+		Documents: documents, Identity: identity, Clock: clock, IDs: ids, Settings: settings,
+		Terrain: database, TerrainRules: cfg.Terrain.Rules, TerrainWakeup: terrain.Wakeup,
+		Conditions: database, Weather: weather, Trafficability: trafficability,
+	}
+	groups := newRouteGroups(wired)
+	// The daily soil history runs the same trafficability core as the GET route.
+	history, err := buildSoilHistoryRuntime(cfg.Trafficability.History, trafficability.Location, database,
+		usecase.NewTrafficabilityEvaluator(wired.trafficabilityDeps()), clock, logger)
+	if err != nil {
+		return err
+	}
 	groups = append(groups, httpadapter.NewAuthHandlers(httpadapter.AuthHandlerDeps{
 		Logger: logger,
 		Flow:   oidcService,
@@ -123,6 +167,16 @@ func run() error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.Serve(listener) }()
 
+	// The worker starts once the database answers and the port is bound; it
+	// first puts fields left calculating by a previous run back to pending.
+	if err := terrain.Start(ctx); err != nil {
+		return err
+	}
+	// The soil history loop stops with ctx (the signal) and is awaited in shutdown.
+	if err := history.Start(ctx); err != nil {
+		return err
+	}
+
 	lifecycle.MarkStarted()
 	logger.Info("api started", "config", cfg.logValue())
 
@@ -132,22 +186,51 @@ func run() error {
 	case <-ctx.Done():
 	}
 
-	return shutdown(logger, server, lifecycle, cfg.Config)
+	return shutdown(logger, server, lifecycle, terrain, history, cfg.Config)
 }
 
-// shutdown drains the instance: readiness goes down first so Kubernetes stops
-// routing traffic, then in-flight requests get ShutdownTimeout to finish. The
-// pool closes afterwards (deferred in run), once nothing can use it.
-func shutdown(logger *slog.Logger, server *http.Server, lifecycle *usecase.Lifecycle, cfg platform.Config) error {
+// shutdown drains the instance, in this order:
+//  1. readiness goes down so Kubernetes stops routing traffic;
+//  2. the HTTP server stops accepting and in-flight requests get ShutdownTimeout
+//     to finish, so nothing can schedule new relief work any more;
+//  3. the relief worker finishes the field it is calculating (it saves through
+//     the pool, so it must end before the pool closes), bounded by the same
+//     timeout; what stays pending or calculating is recovered by the next start;
+//  4. the soil history executor gives up its run (a field not recorded today is
+//     recorded by the next run or instance), bounded by the same timeout;
+//  5. the pool closes afterwards (deferred in run), once nothing can use it.
+func shutdown(logger *slog.Logger, server *http.Server, lifecycle *usecase.Lifecycle, terrain terrainRuntime, history soilHistoryRuntime, cfg platform.Config) error {
 	logger.Info("shutdown signal received, draining")
 	lifecycle.BeginShutdown()
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("shutting down http server: %w", err)
+	serverErr := server.Shutdown(ctx)
+	stopTerrain(ctx, logger, terrain)
+	stopSoilHistory(ctx, logger, history)
+	if serverErr != nil && !errors.Is(serverErr, http.ErrServerClosed) {
+		return fmt.Errorf("shutting down http server: %w", serverErr)
 	}
 	logger.Info("api stopped")
 	return nil
+}
+
+// stopTerrain stops the relief worker, giving up when ctx ends so a field that
+// takes longer than the shutdown budget cannot hold the process hostage.
+func stopTerrain(ctx context.Context, logger *slog.Logger, terrain terrainRuntime) {
+	if !terrain.Enabled() {
+		return
+	}
+	stopped := make(chan struct{})
+	go func() {
+		terrain.Stop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		logger.Info("terrain worker stopped")
+	case <-ctx.Done():
+		logger.Warn("terrain worker did not stop within the shutdown timeout; the field in progress is recovered on the next start")
+	}
 }

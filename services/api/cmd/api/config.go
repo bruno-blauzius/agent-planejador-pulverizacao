@@ -5,7 +5,9 @@ import (
 	"log/slog"
 
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/keycloak"
+	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/objectstorage"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/adapter/oidc"
+	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/domain"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/platform"
 	"github.com/bruno-blauzius/agent-planejador-pulverizacao/services/api/internal/usecase"
 )
@@ -19,6 +21,14 @@ type appConfig struct {
 	Database platform.DatabaseConfig
 	Keycloak keycloak.Config
 	OIDC     oidc.Config
+	// Documents locates the S3 bucket of owner documents; DocumentsEnabled is
+	// false without API_DOCUMENTS_BUCKET (the document routes then answer 503).
+	Documents        objectstorage.Config
+	DocumentsEnabled bool
+	// Terrain is the relief configuration (ADR 0021): rules, worker and elevation source.
+	Terrain platform.TerrainConfig
+	// Trafficability is the rain and soil configuration (ADR 0022): weather source and validity windows.
+	Trafficability platform.TrafficabilityConfig
 }
 
 // loadAppConfig reads and validates everything the API needs to start. Errors
@@ -43,7 +53,22 @@ func loadAppConfig(lookup platform.LookupFunc) (appConfig, error) {
 	if err != nil {
 		return appConfig{}, fmt.Errorf("oidc client: %w", err)
 	}
-	return appConfig{Config: base, Database: database, Keycloak: identity, OIDC: session}, nil
+	documents, documentsEnabled, err := objectstorage.ConfigFromEnv(objectstorage.LookupFunc(lookup))
+	if err != nil {
+		return appConfig{}, fmt.Errorf("owner documents: %w", err)
+	}
+	terrain, err := platform.LoadTerrainConfig(lookup)
+	if err != nil {
+		return appConfig{}, fmt.Errorf("terrain: %w", err)
+	}
+	trafficability, err := platform.LoadTrafficabilityConfig(lookup)
+	if err != nil {
+		return appConfig{}, fmt.Errorf("trafficability: %w", err)
+	}
+	return appConfig{
+		Config: base, Database: database, Keycloak: identity, OIDC: session,
+		Documents: documents, DocumentsEnabled: documentsEnabled, Terrain: terrain, Trafficability: trafficability,
+	}, nil
 }
 
 // settings builds the business values of the use cases.
@@ -54,6 +79,10 @@ func (c appConfig) settings() (usecase.Settings, error) {
 		LastAccessInterval: c.LastAccessInterval,
 		DefaultPageSize:    c.PageSizeDefault,
 		MaxPageSize:        c.PageSizeMax,
+		Areas: domain.AreaRules{
+			MinFarmAreaHa: c.FarmMinAreaHa, MinFieldAreaHa: c.FieldMinAreaHa, ToleranceM2: c.FieldToleranceM2,
+		},
+		MaxDocumentBytes: c.OwnerDocumentMaxBytes,
 	}
 	if err := settings.Validate(); err != nil {
 		return usecase.Settings{}, fmt.Errorf("settings: %w", err)
@@ -78,5 +107,19 @@ func (c appConfig) logValue() slog.Value {
 			slog.Duration("ttl", c.OIDC.SessionTTL),
 		),
 		slog.Duration("invitation_ttl", c.InvitationTTL),
+		slog.Group("terrain",
+			slog.Bool("worker_enabled", c.Terrain.Worker.Enabled),
+			slog.Int("worker_concurrency", c.Terrain.Worker.Concurrency),
+			slog.String("elevation_url", c.Terrain.Elevation.BaseURL),
+		),
+		slog.Group("trafficability",
+			slog.String("weather_url", c.Trafficability.Weather.BaseURL),
+			slog.Duration("weather_cache_ttl", c.Trafficability.Weather.CacheTTL),
+			slog.Duration("gauge_max_staleness", c.Trafficability.GaugeMaxStaleness),
+			slog.Duration("inspection_validity", c.Trafficability.InspectionValidity),
+			slog.Bool("history_enabled", c.Trafficability.History.Enabled),
+			slog.Int("history_hour", c.Trafficability.History.Hour),
+			slog.Int("history_concurrency", c.Trafficability.History.Concurrency),
+		),
 	)
 }
